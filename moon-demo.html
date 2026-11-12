@@ -13,7 +13,7 @@
   .bar { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:0 0 18px; padding:10px 14px;
          border:1px solid var(--line); border-radius:10px; background:#101a26; }
   .bar label { font-size:12px; color:var(--dim); }
-  input[type=range] { width:260px; accent-color:#8fb4ff; }
+  input[type=range] { width:190px; accent-color:#8fb4ff; }
   button { padding:6px 12px; border:1px solid var(--line); border-radius:7px; background:#16222f; color:var(--ink);
            font-size:12px; cursor:pointer; }
   button:hover { background:#1d2c3d; }
@@ -28,13 +28,15 @@
 </style>
 </head>
 <body>
-<h1>月光倒影 · 四种方案</h1>
-<p class="lead">同一个月亮，四种在水面上的画法。拖动时间看它从左往右走，选一个（记住字母），我按那个改进实机。</p>
+<h1>月光倒影 · 四种方案（第二版）</h1>
+<p class="lead">四种画法都吃同一套水面波纹：倒影被波峰波谷推开，朝向月亮的那一侧更亮。拖动「月光亮度」看整体明暗。</p>
 
 <div class="bar">
   <label for="t">时间</label>
   <input id="t" type="range" min="18" max="30" step="0.05" value="21.5">
   <span id="clockTxt">21:30</span>
+  <label for="moon">月光亮度</label>
+  <input id="moon" type="range" min="0" max="1" step="0.01" value="0.6">
   <button id="now">现在</button>
   <button id="play">暂停走动</button>
 </div>
@@ -42,51 +44,73 @@
 <div class="grid">
   <div class="card">
     <canvas id="cA" width="560" height="330"></canvas>
-    <div class="cap"><span class="tag">A</span><b>切片荡漾</b><small>月盘切成横条，每一条随波纹左右错开、明暗起伏</small></div>
+    <div class="cap"><span class="tag">A</span><b>波纹切片</b><small>横向细条，被波纹上下推、左右轻摆，幅度克制</small></div>
   </div>
   <div class="card">
     <canvas id="cB" width="560" height="330"></canvas>
-    <div class="cap"><span class="tag">B</span><b>碎成光带</b><small>只留亮的那几条，月亮被水搅碎成断续横带</small></div>
+    <div class="cap"><span class="tag">B</span><b>碎光带</b><small>只留亮的那几条，断断续续，像被水搅碎</small></div>
   </div>
   <div class="card">
     <canvas id="cC" width="560" height="330"></canvas>
-    <div class="cap"><span class="tag">C</span><b>柔光晕</b><small>不切开，圆盘外裹一层竖向柔光，安静、朦胧</small></div>
+    <div class="cap"><span class="tag">C</span><b>整片折射</b><small>整块月盘按水面斜率做二维折射，最接近真实倒影</small></div>
   </div>
   <div class="card">
     <canvas id="cD" width="560" height="330"></canvas>
-    <div class="cap"><span class="tag">D</span><b>碎钻月光</b><small>几乎没有月盘，只剩一片闪烁的亮点</small></div>
+    <div class="cap"><span class="tag">D</span><b>碎钻月光</b><small>月盘很淡，主要是随波闪烁的碎光点</small></div>
   </div>
 </div>
 
 <script>
 const pond = new Image(); pond.src = 'assets/pond.jpg';
-const T = { hour: 21.5, playing: true, t: 0 };
+const T = { hour: 21.5, playing: true, t: 0, moonK: .6 };
 const $ = (s) => document.querySelector(s);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // 月亮在天空中的位置：18:00 从左边缘升起，24:00 最高，06:00 落到右边缘。
 function moonSpot(hour) {
-  const k = (hour - 18) / 12;                 // 0 → 1
-  const x = 0.08 + k * 0.84;                  // 横向：左到右
-  const y = 0.34 - Math.sin(k * Math.PI) * 0.14; // 纵向：午夜最高，仍留在画面偏上
-  return { x, y, k };
+  const k = (hour - 18) / 12;
+  return { x: 0.10 + k * 0.80, y: 0.36 - Math.sin(k * Math.PI) * 0.14 };
 }
 
-// 把月盘画进一块离屏画布，四种画法都从这块抠。
+// 水面波场：几列不同方向、不同速度的正弦叠加，返回高度斜率 (gx, gy)。
+// gx/gy 就是「这一处水面往哪边倾斜」，倒影和碎光都由它推着走。
+function waveField(x, y, t) {
+  let gx = 0, gy = 0;
+  const add = (dirX, dirY, len, speed, amp, phase) => {
+    const ph = (x * dirX + y * dirY) / len + t * speed + phase;
+    const d = Math.cos(ph) * amp;
+    gx += dirX * d; gy += dirY * d;
+  };
+  add(0.94, 0.34, 26, 1.30, 1.00, 0.0);
+  add(-0.62, 0.78, 19, 1.85, 0.75, 1.7);
+  add(0.28, -0.96, 13, 2.35, 0.55, 3.1);
+  add(0.99, -0.14, 9, 2.90, 0.35, 5.2);
+  return { gx, gy };
+}
+
+// 月盘：画进离屏画布，四种画法都从这块裁。
+const tmp = document.createElement('canvas');
 const disc = document.createElement('canvas');
+let discPx = null, discPxKey = 0;
+function discPixels() {
+  if (discPx && discPxKey === disc.width) return discPx;
+  discPx = disc.getContext('2d').getImageData(0, 0, disc.width, disc.height);
+  discPxKey = disc.width;
+  return discPx;
+}
 function makeDisc(R) {
-  const s = R * 2 + 8;
+  const s = Math.ceil(R * 2 + 8);
   disc.width = disc.height = s;
   const g = disc.getContext('2d');
   const cx = s / 2, cy = s / 2;
-  const grad = g.createRadialGradient(cx, cy, R * 0.55, cx, cy, R);
-  grad.addColorStop(0, 'rgba(238,244,255,1)');
-  grad.addColorStop(0.86, 'rgba(226,236,255,.95)');
-  grad.addColorStop(1, 'rgba(200,220,255,0)');
+  const grad = g.createRadialGradient(cx, cy, R * 0.5, cx, cy, R);
+  grad.addColorStop(0, 'rgba(240,246,255,1)');
+  grad.addColorStop(0.88, 'rgba(228,238,255,.96)');
+  grad.addColorStop(1, 'rgba(198,218,255,0)');
   g.fillStyle = grad;
   g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill();
-  // 一点月海的暗斑，免得看着像纯白圆片
   g.globalCompositeOperation = 'source-atop';
-  g.fillStyle = 'rgba(150,170,205,.30)';
+  g.fillStyle = 'rgba(150,170,205,.28)';
   for (const [dx, dy, r] of [[-.3, .22, .26], [.2, .3, .18], [.3, -.12, .16], [-.36, -.16, .2]]) {
     g.beginPath(); g.arc(cx + dx * R, cy + dy * R, r * R, 0, Math.PI * 2); g.fill();
   }
@@ -101,71 +125,106 @@ function nightBase(ctx, W, H) {
     const w = pond.naturalWidth * k, h = pond.naturalHeight * k;
     ctx.drawImage(pond, (W - w) / 2, (H - h) / 2, w, h);
   }
-  // 夜色：压暗 + 偏冷蓝
-  ctx.fillStyle = 'rgba(9,18,36,.72)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(9,18,36,.74)'; ctx.fillRect(0, 0, W, H);
   const vg = ctx.createRadialGradient(W / 2, H * .45, H * .2, W / 2, H * .5, W * .78);
   vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.55)');
   ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
 }
 
-// 水面横向波纹值：给切片错位和明暗用
-const wave = (y, t, f = 0.075) => Math.sin(y * f + t * 1.6) * .6 + Math.sin(y * f * 2.3 - t * 1.1) * .4;
+// 水面碎光：给个“水在动”的参照，倒影推位才看得出来
+function waterGlints(ctx, W, H, t) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let y = H * .1; y < H; y += 9) {
+    for (let x = 0; x < W; x += 15) {
+      const w = waveField(x, y, t);
+      const s = w.gy * .5 + .5;
+      if (s < .55) continue;
+      ctx.fillStyle = `rgba(170,200,240,${((s - .55) * .16).toFixed(3)})`;
+      ctx.fillRect(x + w.gx * 2, y, 9, 1.4);
+    }
+  }
+  ctx.restore();
+}
 
 function drawReflection(ctx, W, H, R, style, t) {
   const { x, y } = moonSpot(T.hour);
   const cx = x * W, cy = y * H;
   makeDisc(R);
-  const s = disc.width, top = cy - R;
+  const S = disc.width, top = cy - R, K = T.moonK;
 
-  // 把月盘按“屏幕行”切片贴上去：srcY 换成离屏画布里的对应行，ox 是这一行的横向错位。
-  const slice = (rowScreen, h, ox, alpha) => {
-    const srcY = rowScreen - top + 4;
-    if (srcY < 0 || srcY + h > s) return;
-    ctx.globalAlpha = alpha;
-    ctx.drawImage(disc, 0, srcY, s, h, cx - s / 2 + ox, rowScreen, s, h);
-  };
+  // 这一处水面若朝向月亮，倒影就更亮；背向就更暗 —— 它是光，不是贴纸
+  const facet = (gx, gy) => clamp(.55 + .40 * gy + .18 * gx, .10, 1.30);
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
 
   if (style === 'A') {
+    // 横向细条：主要做纵向推位（横纹把倒影上下推），横向只轻摆
     for (let row = Math.ceil(top); row < top + R * 2; row += 2) {
-      const w = wave(row, t);
-      slice(row, 2, w * 3.6, .5 + .5 * (0.5 + 0.5 * w));
+      const w = waveField(cx, row, t);
+      const a = facet(w.gx, w.gy) * K * .95;
+      if (a <= .03) continue;
+      const srcY = row - top + 4;
+      ctx.globalAlpha = clamp(a, 0, 1);
+      ctx.drawImage(disc, 0, srcY, S, 2, cx - S / 2 + w.gx * 1.8, row + w.gy * 1.4, S, 2);
     }
-    ctx.globalAlpha = 1;
   } else if (style === 'B') {
-    for (let row = Math.ceil(top - R * .1); row < top + R * 2.2; row += 3) {
-      const w = wave(row, t, .05);
-      const gap = Math.sin(row * .13 + t * 1.9 + Math.sin(row * .05) * 1.2);
-      if (gap < -.25) continue;
-      slice(row, 3, w * 8, Math.max(.28, .35 + .75 * (0.5 + 0.5 * w)));
+    // 碎光带：只留亮条，中间断开
+    for (let row = Math.ceil(top); row < top + R * 2; row += 3) {
+      const w = waveField(cx, row, t);
+      const gap = Math.sin(row * .33 + t * 2.1 + w.gx * 2);
+      if (gap < -.15) continue;
+      const a = facet(w.gx, w.gy) * K * (0.55 + .45 * gap);
+      if (a <= .04) continue;
+      const srcY = row - top + 4;
+      ctx.globalAlpha = clamp(a, 0, 1);
+      ctx.drawImage(disc, 0, srcY, S, 3, cx - S / 2 + w.gx * 3.4, row + w.gy * 2.4, S, 3);
     }
-    ctx.globalAlpha = 1;
   } else if (style === 'C') {
-    const g = ctx.createRadialGradient(cx, cy, R * .2, cx, cy, R * 2.8);
-    g.addColorStop(0, 'rgba(214,230,255,.5)');
-    g.addColorStop(.42, 'rgba(168,199,255,.15)');
-    g.addColorStop(1, 'rgba(140,180,255,0)');
-    ctx.save(); ctx.translate(cx, cy); ctx.scale(.78, 1.45); ctx.translate(-cx, -cy);
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R * 2.8, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
-    ctx.globalAlpha = .92; ctx.drawImage(disc, cx - s / 2, cy - s / 2); ctx.globalAlpha = 1;
+    // 整片折射：逐像素按当地水面斜率反向采样，和水里景物的折射同一套算法，没有接缝。
+    const pad = 18, w = Math.ceil(R * 2 + pad * 2), h = w;
+    if (tmp.width !== w) { tmp.width = tmp.height = w; }
+    const tctx = tmp.getContext('2d');
+    const src = discPixels(), out = tctx.createImageData(w, h), dst = out.data, sd = src.data, SW = src.width;
+    const ampX = 6, ampY = 4.5, half = w / 2;
+    for (let yy = 0; yy < h; yy++) {
+      for (let xx = 0; xx < w; xx++) {
+        const wv = waveField(cx - pad + xx, cy - pad + yy, t);
+        const u = (xx - half + R + 4 - wv.gx * ampX) | 0;
+        const v = (yy - half + R + 4 - wv.gy * ampY) | 0;
+        if (u < 0 || v < 0 || u >= SW || v >= SW) continue;
+        const si = (v * SW + u) * 4, di = (yy * w + xx) * 4;
+        const m = clamp(facet(wv.gx, wv.gy) * K, 0, 1);
+        dst[di] = sd[si]; dst[di + 1] = sd[si + 1]; dst[di + 2] = sd[si + 2];
+        dst[di + 3] = sd[si + 3] * m;
+      }
+    }
+    tctx.putImageData(out, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.drawImage(tmp, cx - half, cy - half);
   } else {
-    ctx.globalAlpha = .16; ctx.drawImage(disc, cx - s / 2, cy - s / 2); ctx.globalAlpha = 1;
-    // 水面被压扁：点在横向拉长、纵向压扁的椭圆里随机散开，各自闪烁
-    for (let i = 0; i < 110; i++) {
-      const a = (i * 12.9898 + 4.1) % 6.283, rr = Math.sqrt(((i * 37.719) % 1));
-      const px = cx + Math.cos(a) * rr * R * 1.75;
-      const py = cy + Math.sin(a) * rr * R * .62;
-      const tw = .5 + .5 * Math.sin(t * 3.4 + i * 2.1);
-      const sz = 1.6 + (((i * 53.7) % 1) * 2.2);
-      ctx.fillStyle = `rgba(228,240,255,${(.10 + .62 * tw).toFixed(3)})`;
-      ctx.fillRect(px, py, sz, sz * .8);
+    // 碎钻：淡月盘 + 随波明灭的碎光点
+    ctx.globalAlpha = clamp(.2 * K, 0, 1);
+    ctx.drawImage(disc, cx - S / 2, cy - S / 2);
+    for (let i = 0; i < 130; i++) {
+      const a0 = (i * 12.9898 + 4.1) % 6.283, rr = Math.sqrt((i * 37.719) % 1);
+      const bx = cx + Math.cos(a0) * rr * R * 1.6;
+      const by = cy + Math.sin(a0) * rr * R * .55;
+      const w = waveField(bx, by, t);
+      const tw = .5 + .5 * Math.sin(t * 3.4 + i * 2.1 + w.gx * 3);
+      const a = clamp((.12 + .75 * tw) * K, 0, 1);
+      const sz = 1.5 + ((i * 53.7) % 1) * 2;
+      ctx.fillStyle = `rgba(230,240,255,${a.toFixed(3)})`;
+      ctx.fillRect(bx + w.gx * 5, by + w.gy * 3, sz, sz * .8);
     }
   }
+  ctx.restore();
+  ctx.globalAlpha = 1;
 }
 
-const views = [
-  ['cA', 'A'], ['cB', 'B'], ['cC', 'C'], ['cD', 'D'],
-].map(([id, style]) => ({ ctx: document.getElementById(id).getContext('2d'), style, W: 560, H: 330 }));
+const views = [['cA', 'A'], ['cB', 'B'], ['cC', 'C'], ['cD', 'D']]
+  .map(([id, style]) => ({ ctx: document.getElementById(id).getContext('2d'), style, W: 560, H: 330 }));
 
 let last = performance.now();
 function frame(now) {
@@ -173,19 +232,20 @@ function frame(now) {
   if (T.playing) { T.t += dt; T.hour += dt * .25; if (T.hour > 30) T.hour = 18; syncTime(); }
   for (const v of views) {
     nightBase(v.ctx, v.W, v.H);
-    drawReflection(v.ctx, v.W, v.H, 30, v.style, T.t);
+    waterGlints(v.ctx, v.W, v.H, T.t);
+    drawReflection(v.ctx, v.W, v.H, 40, v.style, T.t);
   }
   requestAnimationFrame(frame);
 }
 
 function syncTime() {
-  const h = T.hour % 24;
-  const hh = Math.floor(h), mm = Math.floor((h - hh) * 60);
+  const h = T.hour % 24, hh = Math.floor(h), mm = Math.floor((h - hh) * 60);
   $('#clockTxt').textContent = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
   $('#t').value = T.hour;
 }
 
 $('#t').addEventListener('input', (e) => { T.hour = Number(e.target.value); T.playing = false; $('#play').textContent = '继续走动'; syncTime(); });
+$('#moon').addEventListener('input', (e) => { T.moonK = Number(e.target.value); });
 $('#play').addEventListener('click', () => { T.playing = !T.playing; $('#play').textContent = T.playing ? '暂停走动' : '继续走动'; });
 $('#now').addEventListener('click', () => {
   const d = new Date(), h = d.getHours() + d.getMinutes() / 60;
