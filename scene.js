@@ -491,9 +491,17 @@
       this.crabHomes = CRAB_HOMES.map((c, i) => [i, R.imageToScreen(c[0], c[1])]).filter(([, [x, y]]) => x > 30 && x < w - 30 && y > 30 && y < h - 30).map(([i]) => i);
       for (const c of this.crabs) if (!this.crabHomes.includes(c.home)) { c.state = 'hidden'; c.timer = 1 + this.rnd() * 5; }
       this.causticCell = clamp(Math.min(w, h) / 7, 70, 150);
-      const [mx, my] = R.imageToScreen(1000, 255); this.moonAt = [clamp(mx, w * .2, w * .8), clamp(my, h * .15, h * .5)]; this.phaseAt = 0;
+      this.moonAt = this.moonClock(w, h); this.phaseAt = 0;
       for (const b of this.butterflies) { if (b.x < 0) { b.x = this.rnd() * w; b.y = this.rnd() * h; } else { b.x *= w / this.prevW; b.y *= h / this.prevH; } b.target = null; b.state = 'fly'; }
       this.prevW = w; this.prevH = h;
+    }
+    // The moon keeps the sky's own clock: up in the east at dusk, highest around midnight, down in the west by dawn.
+    // Only a coarse path — a wallpaper wants a moon roughly where it belongs, not an ephemeris.
+    moonClock(w, h, now = new Date()) {
+      const t = now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;
+      // 18:00 → 0（东边升起），次日 06:00 → 1（西边落下）；中午前后一律按落下处理，反正白天看不见。
+      const k = clamp((t < 12 ? t + 24 : t) - 18, 0, 12) / 12;
+      return [w * (.12 + .76 * k), h * (.34 - Math.sin(k * Math.PI) * .13)];
     }
     setLook(weather, night, dt, amounts = {}) {
       const target = lookFor(weather, night, amounts.rainAmount, amounts.snowAmount);
@@ -506,6 +514,9 @@
       // so turning one never disturbs the other.
       const want = night ? clamp(Number(amounts.moonlight ?? .55) || 0, 0, 1) : 0;
       this.look.moonlight = dt === undefined || this.look.moonlight === undefined ? want : this.look.moonlight + (want - this.look.moonlight) * Math.min(1, dt * 2);
+      // The reflection switch, under 月下观鱼: the moon's face on the water can be turned off while the moonlight stays.
+      const wantMirror = amounts.moonReflect === false ? 0 : 1;
+      this.look.moonReflect = dt === undefined || this.look.moonReflect === undefined ? wantMirror : this.look.moonReflect + (wantMirror - this.look.moonReflect) * Math.min(1, dt * 4);
       const pre = night ? 'night' : 'day';
       this.look.contrast = clamp(Number(amounts[pre + 'Contrast'] ?? 1) || 1, .6, 1.6);
       this.look.brightness = clamp(Number(amounts[pre + 'Bright'] ?? 1) || 1, .5, 1.8);
@@ -513,8 +524,8 @@
     }
     update(dt, settings) {
       this.time += dt;
-      if (this.time - this.phaseAt > 60 || !this.moonDisc) { this.phaseAt = this.time; this.phase = moonPhase(); }
-      this.moonDisc = [this.moonAt[0], this.h - this.moonAt[1], 26 * this.scale, this.phase.angle];
+      if (this.time - this.phaseAt > 60 || !this.moonDisc) { this.phaseAt = this.time; this.phase = moonPhase(); this.moonAt = this.moonClock(this.w, this.h); }
+      this.moonDisc = [this.moonAt[0], this.h - this.moonAt[1], 34 * this.scale, this.phase.angle];
       const rainK = clamp(settings.rainAmount ?? .5, 0, 1), snowK = clamp(settings.snowAmount ?? .5, 0, 1);
       // Snow settles on leaves, flowers and rocks while it falls and melts away after.
       this.snowCover = settings.weather === 'snow' ? Math.min(snowK * .9, (this.snowCover || 0) + dt * (.004 + .02 * snowK)) : Math.max(0, (this.snowCover || 0) - dt * .012);

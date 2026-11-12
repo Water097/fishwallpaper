@@ -21,10 +21,10 @@ const icon=n=>`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[n]||
 function icons(root=document){root.querySelectorAll('[data-icon]').forEach(e=>e.innerHTML=icon(e.dataset.icon));}
 icons();
 let saved=null;try{saved=sanitizeSave(JSON.parse(localStorage.getItem('bichi-pond-v1')??localStorage.getItem('xitan-pond-v1')??localStorage.getItem('bitan-pond-v1')));}catch{}
-const defaults={weather:'sunny',speed:1,turtles:true,crabs:true,silverCarp:true,butterflies:true,names:false,quality:'high',autoWeather:false,location:null,night:false,water:true,waterType:'stream',waterVol:.6,weatherSound:true,weatherVol:.6,music:'guqin',musicVol:.5,sfx:true,volume:.7,rainAmount:.5,snowAmount:.5,soundOn:false,moonlight:.55,verseOn:true,verseA:'水清鱼读月',verseB:'花静鸟谈天',seal:'闲观',dayContrast:1,dayBright:1,dayHue:0,nightContrast:1,nightBright:1,nightHue:0};
+const defaults={weather:'sunny',speed:1,turtles:true,crabs:true,silverCarp:true,butterflies:true,names:false,quality:'high',autoWeather:false,location:null,night:false,water:true,waterType:'stream',waterVol:.6,weatherSound:true,weatherVol:.6,music:'guqin',musicVol:.5,sfx:true,volume:.7,rainAmount:.5,snowAmount:.5,soundOn:false,moonlight:.55,moonReflect:true,verseOn:true,verseA:'水清鱼读月',verseB:'花静鸟谈天',seal:'闲观',dayContrast:1,dayBright:1,dayHue:0,nightContrast:1,nightBright:1,nightHue:0};
 const settings={...defaults};
 // Copy valid values from a stored settings object (this page's save, or one written by another window).
-function readSettings(src){for(const key of ['turtles','crabs','silverCarp','butterflies','names','autoWeather','night','sfx','water','weatherSound','soundOn','verseOn'])if(typeof src[key]==='boolean')settings[key]=src[key];
+function readSettings(src){for(const key of ['turtles','crabs','silverCarp','butterflies','names','autoWeather','night','sfx','water','weatherSound','soundOn','verseOn','moonReflect'])if(typeof src[key]==='boolean')settings[key]=src[key];
   if(PondAudio.MUSIC.includes(src.music))settings.music=src.music;if(PondAudio.WATERS.includes(src.waterType))settings.waterType=src.waterType;for(const key of ['volume','waterVol','weatherVol','musicVol','rainAmount','snowAmount'])if(Number.isFinite(src[key]))settings[key]=clamp(src[key],0,1);
   if(['sunny','cloudy','rain','snow'].includes(src.weather))settings.weather=src.weather;
   settings.speed=clamp(Number(src.speed)||1,.3,2);
@@ -215,13 +215,158 @@ function renderRanking(tab=rankingTab){
     list.append(rowOf(f,i,`${PALETTES[f.palette].name} · ${hungerWord(f.hunger)}`,`${pct}<small>%</small>`,`<div class="hunger-bar"><i style="width:${pct}%;background:${hungerTint(f.hunger)}"></i></div>`));});
   $('#panel-content').querySelectorAll('[data-rank]').forEach(b=>b.addEventListener('click',()=>renderRanking(b.dataset.rank)));
 }
-function renderWeather(){prefsHost().innerHTML=`<p class="description">晴日看波光，雨天听水声。让池塘拥有此刻的心情。</p><div class="weather-options">${[['sunny','晴日','sun'],['cloudy','多云','cloudy'],['rain','下雨','rain'],['snow','落雪','snow']].map(([v,n,i])=>`<button class="weather-option ${settings.weather===v?'selected':''}" data-weather="${v}" aria-pressed="${settings.weather===v}">${icon(i)}<span>${n}</span></button>`).join('')}</div><div class="setting-row"><div>雨量<small id="rain-note">${rainLabel()} · 下雨时生效，跟随城市天气时自动调整</small></div><input id="rain-amount" type="range" aria-label="雨量" min="0" max="1" step="0.05" value="${settings.rainAmount}"/></div><div class="setting-row"><div>雪量<small id="snow-note">${snowLabel()} · 落雪时生效，荷叶上会渐渐积雪</small></div><input id="snow-amount" type="range" aria-label="雪量" min="0" max="1" step="0.05" value="${settings.snowAmount}"/></div><div class="setting-row"><div>月下观鱼<small>夜色里，池中倒映今夜的月亮</small></div><input id="night" type="checkbox" aria-label="月下观鱼" ${settings.night?'checked':''}/></div><div class="setting-row sub${settings.night?'':' off'}" id="moonlight-row"><div>月光亮度<small>月光落在水面，随波纹晃动；拉到 0 就是熄灯</small></div><input id="moonlight" type="range" aria-label="月光亮度" min="0" max="1" step="any" value="${settings.moonlight}"/></div><h3>调色</h3><div class="grade-head"><span>白天</span><button class="grade-reset-btn" type="button" data-grade-reset="day" aria-label="恢复默认" title="恢复默认">${icon('reset')}</button></div><div class="grade-row"><span>对比度</span><input data-grade="dayContrast" type="range" aria-label="白天对比度" min="0.7" max="1.4" step="any" value="${settings.dayContrast}"/></div><div class="grade-row"><span>亮度</span><input data-grade="dayBright" type="range" aria-label="白天亮度" min="0.6" max="1.6" step="any" value="${settings.dayBright}"/></div><div class="grade-row"><span>色调</span><input data-grade="dayHue" type="range" aria-label="白天色调" min="-40" max="40" step="any" value="${settings.dayHue}"/></div><div class="grade-head"><span>夜晚</span><button class="grade-reset-btn" type="button" data-grade-reset="night" aria-label="恢复默认" title="恢复默认">${icon('reset')}</button></div><div class="grade-row"><span>对比度</span><input data-grade="nightContrast" type="range" aria-label="夜晚对比度" min="0.7" max="1.4" step="any" value="${settings.nightContrast}"/></div><div class="grade-row"><span>亮度</span><input data-grade="nightBright" type="range" aria-label="夜晚亮度" min="0.6" max="1.6" step="any" value="${settings.nightBright}"/></div><div class="grade-row"><span>色调</span><input data-grade="nightHue" type="range" aria-label="夜晚色调" min="-40" max="40" step="any" value="${settings.nightHue}"/></div><div class="setting-row"><div>跟随城市天气<small>每 15 分钟同步晴、雨、雪</small></div><input id="auto-weather" type="checkbox" aria-label="跟随城市天气" ${settings.autoWeather?'checked':''}/></div><h3>城市天气</h3><form id="city-form" class="form-row"><input id="city-input" aria-label="城市名称" type="text" maxlength="80" placeholder="输入城市，如北京、杭州、Shanghai" required/><button class="secondary" type="submit">查询</button></form><div id="city-results" class="city-results" aria-live="polite"></div><div class="weather-info" id="weather-info"></div><p class="dialog-footer">城市查询仅发送城市名称，天气查询使用所选城市坐标。<br>天气数据由 <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> 提供，无需 API 密钥。</p>`;
-  updateWeatherInfo();document.querySelectorAll('[data-weather]').forEach(b=>b.addEventListener('click',()=>{settings.weather=b.dataset.weather;settings.autoWeather=false;weatherRequest++;persist();applyWeather();renderWeather();}));$('#night').addEventListener('change',e=>{settings.night=e.target.checked;$('#moonlight-row')?.classList.toggle('off',!settings.night);applyWeather();persist();});$('#moonlight').addEventListener('input',e=>{settings.moonlight=Number(e.target.value);applyGrade();scheduleSave();});document.querySelectorAll('[data-grade]').forEach(input=>input.addEventListener('input',()=>{settings[input.dataset.grade]=Number(input.value);applyGrade();scheduleSave();}));document.querySelectorAll('[data-grade-reset]').forEach(b=>b.addEventListener('click',()=>{const p=b.dataset.gradeReset;Object.assign(settings,{[p+'Contrast']:1,[p+'Bright']:1,[p+'Hue']:0});applyGrade();persist();renderWeather();toast(p==='day'?'白天调色已恢复默认':'夜晚调色已恢复默认');}));$('#rain-amount').addEventListener('input',e=>{settings.rainAmount=Number(e.target.value);$('#rain-note').firstChild.textContent=`${rainLabel()} · 下雨时生效，跟随城市天气时自动调整`;applyWeather();scheduleSave();});$('#snow-amount').addEventListener('input',e=>{settings.snowAmount=Number(e.target.value);$('#snow-note').firstChild.textContent=`${snowLabel()} · 落雪时生效，荷叶上会渐渐积雪`;applyWeather();scheduleSave();});$('#auto-weather').addEventListener('change',e=>{if(e.target.checked&&!settings.location){e.target.checked=false;toast('先查询并选择一个城市');$('#city-input').focus();return;}settings.autoWeather=e.target.checked;if(!settings.autoWeather)weatherRequest++;persist();applyWeather();if(settings.autoWeather)fetchWeather();updateWeatherInfo();});$('#city-form').addEventListener('submit',searchCity);}
+// ---- 折叠分组 -------------------------------------------------------------------------------------------
+// 设置项一多，全平铺下来一屏读不完。凡是「挂在某一项下面」的东西都收进它自己的组里，展开状态记在本机，
+// 面板整块重绘之后仍然保持。
+const foldState = (() => { try { return JSON.parse(localStorage.getItem('bichi-folds') || '{}') || {}; } catch { return {}; } })();
+function foldGroup(key, title, body, open, extra = '') {
+  if (open === undefined) open = true;
+  if (typeof foldState[key] === 'boolean') open = foldState[key];
+  return `<section class="fold${open ? ' open' : ''}" data-fold="${key}">`
+    + `<div class="fold-head" role="button" tabindex="0" aria-expanded="${open}"><span>${title}</span>${extra}<i class="fold-chev" aria-hidden="true"></i></div>`
+    + `<div class="fold-body">${body}</div></section>`;
+}
+// 面板会整块重绘，所以分组开关绑在 document 上一次就够。
+document.addEventListener('click', e => {
+  if (e.target.closest('.grade-reset-btn')) return;
+  const head = e.target.closest('.fold-head'); if (!head) return;
+  const box = head.parentElement, open = !box.classList.contains('open');
+  box.classList.toggle('open', open); head.setAttribute('aria-expanded', open);
+  foldState[box.dataset.fold] = open;
+  try { localStorage.setItem('bichi-folds', JSON.stringify(foldState)); } catch {}
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const head = e.target.closest ? e.target.closest('.fold-head') : null; if (!head) return;
+  e.preventDefault(); head.click();
+});
+
+function renderWeather(){
+  const weathers = [['sunny', '晴日', 'sun'], ['cloudy', '多云', 'cloudy'], ['rain', '下雨', 'rain'], ['snow', '落雪', 'snow']];
+  // 降水强度是「下雨 / 落雪」的下级：选了什么天气，才出现它自己的强度，别的一概不占地方。
+  const precip = settings.weather === 'rain'
+    ? `<div class="setting-row sub"><div>雨量<small id="rain-note">${rainLabel()} · 跟随城市天气时自动调整</small></div><input id="rain-amount" type="range" aria-label="雨量" min="0" max="1" step="0.05" value="${settings.rainAmount}"/></div>`
+    : settings.weather === 'snow'
+      ? `<div class="setting-row sub"><div>雪量<small id="snow-note">${snowLabel()} · 荷叶上会渐渐积雪</small></div><input id="snow-amount" type="range" aria-label="雪量" min="0" max="1" step="0.05" value="${settings.snowAmount}"/></div>`
+      : '';
+  // 月下观鱼的两个下级：月亮倒影与月光亮度。开关关掉时整块收起。
+  const moonSub = `<div class="sub-block${settings.night ? '' : ' is-off'}" id="moon-sub">`
+    + `<div class="setting-row sub"><div>月亮倒影<small>水面上的月影，随波纹晃动</small></div><input id="moon-reflect" type="checkbox" aria-label="月亮倒影" ${settings.moonReflect ? 'checked' : ''}/></div>`
+    + `<div class="setting-row sub"><div>月光亮度<small>整池月色，拉到 0 就是熄灯</small></div><input id="moonlight" type="range" aria-label="月光亮度" min="0" max="1" step="any" value="${settings.moonlight}"/></div></div>`;
+  const gradeRows = (pre, label) => [['Contrast', '对比度', .7, 1.4], ['Bright', '亮度', .6, 1.6], ['Hue', '色调', -40, 40]]
+    .map(([f, n, lo, hi]) => `<div class="grade-row"><span>${n}</span><input data-grade="${pre}${f}" type="range" aria-label="${label}${n}" min="${lo}" max="${hi}" step="any" value="${settings[pre + f]}"/></div>`).join('');
+  const resetBtn = pre => `<button class="grade-reset-btn" type="button" data-grade-reset="${pre}" aria-label="恢复默认" title="恢复默认">${icon('reset')}</button>`;
+  // 城市天气：先搜索并选定城市，跟随城市天气这个开关才会出现在它下面。
+  const cityBody = `<form id="city-form" class="form-row"><input id="city-input" aria-label="城市名称" type="text" maxlength="80" placeholder="输入城市，如北京、杭州、Shanghai" required/><button class="secondary" type="submit">查询</button></form>`
+    + `<div id="city-results" class="city-results" aria-live="polite"></div>`
+    + `<div class="weather-info" id="weather-info"></div>`
+    + (settings.location
+      ? `<div class="setting-row sub"><div>跟随城市天气<small>每 15 分钟同步晴、雨、雪</small></div><input id="auto-weather" type="checkbox" aria-label="跟随城市天气" ${settings.autoWeather ? 'checked' : ''}/></div>`
+      : `<div class="setting-row sub is-off"><div>跟随城市天气<small>先查询并选择一个城市</small></div></div>`)
+    + `<p class="dialog-footer">城市查询仅发送城市名称，天气查询使用所选城市坐标。<br>天气数据由 <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> 提供，无需 API 密钥。</p>`;
+
+  prefsHost().innerHTML = `<p class="description">晴日看波光，雨天听水声。让池塘拥有此刻的心情。</p>`
+    + `<div class="weather-options">${weathers.map(([v, n, i]) => `<button class="weather-option ${settings.weather === v ? 'selected' : ''}" data-weather="${v}" aria-pressed="${settings.weather === v}">${icon(i)}<span>${n}</span></button>`).join('')}</div>`
+    + precip
+    + `<div class="setting-row"><div>月下观鱼<small>夜色里，池中倒映今夜的月亮</small></div><input id="night" type="checkbox" aria-label="月下观鱼" ${settings.night ? 'checked' : ''}/></div>`
+    + moonSub
+    + `<h3>调色</h3>`
+    + foldGroup('grade-day', '白天', gradeRows('day', '白天'), false, resetBtn('day'))
+    + foldGroup('grade-night', '夜晚', gradeRows('night', '夜晚'), false, resetBtn('night'))
+    + foldGroup('city', '城市天气', cityBody, false);
+
+  updateWeatherInfo();
+  document.querySelectorAll('[data-weather]').forEach(b => b.addEventListener('click', () => { settings.weather = b.dataset.weather; settings.autoWeather = false; weatherRequest++; persist(); applyWeather(); renderWeather(); }));
+  $('#night').addEventListener('change', e => {
+    settings.night = e.target.checked;
+    $('#moon-sub')?.classList.toggle('is-off', !e.target.checked);
+    applyWeather(); persist();
+  });
+  $('#moon-reflect').addEventListener('change', e => { settings.moonReflect = e.target.checked; applyGrade(); persist(); });
+  $('#moonlight').addEventListener('input', e => { settings.moonlight = Number(e.target.value); applyGrade(); scheduleSave(); });
+  document.querySelectorAll('[data-grade]').forEach(input => input.addEventListener('input', () => { settings[input.dataset.grade] = Number(input.value); applyGrade(); scheduleSave(); }));
+  document.querySelectorAll('[data-grade-reset]').forEach(b => b.addEventListener('click', () => {
+    const p = b.dataset.gradeReset;
+    Object.assign(settings, { [p + 'Contrast']: 1, [p + 'Bright']: 1, [p + 'Hue']: 0 });
+    applyGrade(); persist(); renderWeather(); toast(p === 'day' ? '白天调色已恢复默认' : '夜晚调色已恢复默认');
+  }));
+  $('#rain-amount')?.addEventListener('input', e => {
+    settings.rainAmount = Number(e.target.value);
+    const note = $('#rain-note'); if (note) note.firstChild.textContent = `${rainLabel()} · 跟随城市天气时自动调整`;
+    applyWeather(); scheduleSave();
+  });
+  $('#snow-amount')?.addEventListener('input', e => {
+    settings.snowAmount = Number(e.target.value);
+    const note = $('#snow-note'); if (note) note.firstChild.textContent = `${snowLabel()} · 荷叶上会渐渐积雪`;
+    applyWeather(); scheduleSave();
+  });
+  $('#auto-weather')?.addEventListener('change', e => {
+    if (e.target.checked && !settings.location) { e.target.checked = false; toast('先查询并选择一个城市'); $('#city-input').focus(); return; }
+    settings.autoWeather = e.target.checked;
+    if (!settings.autoWeather) weatherRequest++;
+    persist(); applyWeather(); if (settings.autoWeather) fetchWeather(); updateWeatherInfo();
+  });
+  $('#city-form').addEventListener('submit', searchCity);
+}
+
+
 function updateWeatherInfo(){const box=$('#weather-info');if(!box)return;if(settings.location&&weatherData){box.textContent=`${settings.location.name} · ${Math.round(weatherData.temperature_2m)}°C · 风速 ${weatherData.wind_speed_10m} km/h · ${settings.autoWeather?'正在联动池塘':'未开启天气联动'}`;}else if(settings.location){box.textContent=`已选择 ${settings.location.name} · ${settings.autoWeather?'正在获取实时天气…':'天气联动未开启'}`;}else box.textContent='当前为手动天气。查询城市后，选择搜索结果即可开启实时联动。';}
 async function searchCity(e){e.preventDefault();const query=$('#city-input').value.trim();if(!query)return;const results=$('#city-results'),button=$('#city-form button');citySearchController?.abort();const controller=new AbortController();citySearchController=controller;const timeout=setTimeout(()=>controller.abort(),12000);button.disabled=true;button.textContent='查询中';results.textContent='正在寻找城市…';try{const response=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=zh&format=json`,{signal:controller.signal});if(!response.ok)throw Error('network');const data=await response.json();if(!results.isConnected)return;results.replaceChildren();if(!data.results?.length){results.textContent='没有找到这个城市，试试城市拼音或英文名称。';return;}for(const place of data.results){const b=document.createElement('button');b.className='city-result';b.textContent=`${place.name} · ${place.admin1||''} ${place.country||''}`;b.addEventListener('click',()=>{settings.location={name:place.name,latitude:place.latitude,longitude:place.longitude};settings.autoWeather=true;weatherData=null;persist();applyWeather();renderWeather();fetchWeather();});results.append(b);}}catch{if(results.isConnected)results.textContent='城市查询失败，请检查网络后重试。仍可使用上方的手动天气。';}finally{clearTimeout(timeout);if(button.isConnected){button.disabled=false;button.textContent='查询';}}}
 async function fetchWeather(){if(!settings.autoWeather||!settings.location)return;const request=++weatherRequest,location={...settings.location};try{const response=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${location.latitude}&longitude=${location.longitude}&current=temperature_2m,weather_code,wind_speed_10m,precipitation,snowfall&timezone=auto`,{signal:AbortSignal.timeout(12000)});if(!response.ok)throw Error('network');const data=await response.json();if(request!==weatherRequest||!settings.autoWeather)return;if(!Number.isFinite(data.current?.temperature_2m)||!Number.isFinite(data.current?.weather_code))throw Error('data');weatherData=data.current;settings.weather=weatherFromCode(weatherData.weather_code);if(settings.weather==='rain'&&Number.isFinite(weatherData.precipitation))settings.rainAmount=clamp(.15+weatherData.precipitation/8,.15,1);if(settings.weather==='snow'&&Number.isFinite(weatherData.snowfall))settings.snowAmount=clamp(.2+weatherData.snowfall/1.5,.2,1);applyWeather();persist();if(activePanel==='weather')renderWeather();}catch{if(request!==weatherRequest)return;$('#weather-note').textContent='天气同步失败 · 保留当前天气';if(activePanel==='weather'&&$('#weather-info'))$('#weather-info').textContent='天气服务暂时无法连接，已保留当前池塘天气，可稍后重试。';toast('实时天气暂不可用，已保留当前天气');}}
 setInterval(fetchWeather,15*60*1000);if(settings.autoWeather)fetchWeather();
-function renderSettings(){prefsHost().innerHTML=`<p class="description">把这方小天地，调成你喜欢的模样。</p><div class="setting-row"><div>游动速度<small>慢一点，也是一种生活</small></div><input id="swim-speed" type="range" aria-label="游动速度" min="0.3" max="2" step="0.1" value="${settings.speed}"/></div>${[['turtles','小乌龟','两位慢悠悠的池塘住客'],['crabs','小螃蟹','在池边石头上横着走，一有动静就钻进水里'],['silverCarp','青鲢鱼','银鳞结伴，穿梭于锦鲤之间'],['butterflies','蝴蝶与蜻蜓','晴日蝶舞，蜻蜓点水，夜里萤火点点'],['names','显示锦鲤名字','在水面认出你的每一位朋友']].map(([k,n,d])=>`<div class="setting-row"><div>${n}<small>${d}</small></div><input data-setting="${k}" type="checkbox" aria-label="${n}" ${settings[k]?'checked':''}/></div>`).join('')}<div class="setting-row"><div>画面品质<small>节能模式限制至 30 帧</small></div><select id="quality" aria-label="画面品质"><option value="high" ${settings.quality==='high'?'selected':''}>细腻 · 60 帧</option><option value="eco" ${settings.quality==='eco'?'selected':''}>节能 · 30 帧</option></select></div><h3>诗句</h3><div class="setting-row"><div>显示诗句<small>左侧竖排的两句诗与印章</small></div><input data-setting="verseOn" type="checkbox" aria-label="显示诗句" ${settings.verseOn?'checked':''}/></div><div class="setting-row"><div>上句<small>最多 7 字</small></div><input data-verse="verseA" type="text" maxlength="7" value="${settings.verseA}" aria-label="上句"/></div><div class="setting-row"><div>下句<small>最多 7 字</small></div><input data-verse="verseB" type="text" maxlength="7" value="${settings.verseB}" aria-label="下句"/></div><div class="setting-row"><div>印章<small>最多 4 字，逐字竖排</small></div><input data-verse="seal" type="text" maxlength="4" value="${settings.seal}" aria-label="印章"/></div><h3>声音</h3><div class="setting-row"><div>总音量<small>底栏喇叭可随时开关全部声音</small></div><input id="volume" type="range" aria-label="总音量" min="0" max="1" step="0.05" value="${settings.volume}"/></div><div class="setting-row"><div>水声<small>池畔流水，独立于天气</small></div><div class="sound-ctl"><input data-vol="waterVol" type="range" aria-label="水声音量" min="0" max="1" step="0.05" value="${settings.waterVol}"/><select id="water-type" aria-label="水声">${[['stream','溪流潺潺'],['spring','山泉叮咚'],['cascade','叠水瀑声'],['lapping','池水轻漾'],['bamboo','竹筒惊鹿'],['off','关闭']].map(([v,n])=>`<option value="${v}" ${(settings.water?settings.waterType:'off')===v?'selected':''}>${n}</option>`).join('')}</select></div></div>${[['weatherSound','weatherVol','天气环境音','晴有鸟鸣、阴闻布谷、雨落池塘、雪有寒鸦、夏夜虫蛙']].map(([k,v,n,d])=>`<div class="setting-row"><div>${n}<small>${d}</small></div><div class="sound-ctl"><input data-vol="${v}" type="range" aria-label="${n}音量" min="0" max="1" step="0.05" value="${settings[v]}"/><input data-sound="${k}" type="checkbox" aria-label="${n}" ${settings[k]?'checked':''}/></div></div>`).join('')}<div class="setting-row"><div>禅意音乐<small>稀疏几声，不扰清静</small></div><div class="sound-ctl"><input data-vol="musicVol" type="range" aria-label="禅意音乐音量" min="0" max="1" step="0.05" value="${settings.musicVol}"/><select id="music" aria-label="禅意音乐">${[['guqin','古琴'],['bowl','颂钵'],['chimes','风铃'],['off','关闭']].map(([v,n])=>`<option value="${v}" ${settings.music===v?'selected':''}>${n}</option>`).join('')}</select></div></div><div class="setting-row"><div>互动水声<small>投喂、吞食与轻点水面的声音</small></div><input data-sound="sfx" type="checkbox" aria-label="互动水声" ${settings.sfx?'checked':''}/></div>${window.PondHost?`<div class="setting-row"><div>手机动态壁纸<small id="wallpaper-note">${PondHost.isWallpaperActive()?'池塘已在桌面上 · 轻点桌面空白处投喂':'把池塘设为手机桌面背景'}${PondHost.wallpaperStatus?.()?`<br>壁纸状态：${PondHost.wallpaperStatus().replace(/[<>&]/g,'')}`:''}</small></div><button id="set-wallpaper" class="secondary">设为壁纸</button></div>`:''}<div class="form-actions"><span class="small-note">锦鲤和投喂记录会自动保存在此设备</span><button id="fullscreen" class="secondary">全屏观鱼</button></div><div class="dialog-footer">空格：在池塘中央投喂（先点水面）<br>H：隐藏 / 显示界面 · Esc：退出面板或沉浸模式<br>根据「碧潭观鱼」视频独立复刻，非原作者官方作品。</div>`;$('#set-wallpaper')?.addEventListener('click',()=>PondHost.setWallpaper());$('#swim-speed').addEventListener('input',e=>{settings.speed=Number(e.target.value);scheduleSave();});document.querySelector('[data-verse]')&&document.querySelectorAll('[data-verse]').forEach(input=>input.addEventListener('input',()=>{const k=input.dataset.verse;settings[k]=(input.value||'').replace(/\s+/g,'').slice(0,k==='seal'?4:7);applyVerse();scheduleSave();}));document.querySelectorAll('[data-setting]').forEach(input=>input.addEventListener('change',()=>{settings[input.dataset.setting]=input.checked;applyGrade();applyVerse();if(input.dataset.setting==='silverCarp'){simulation.residentsOn=settings.silverCarp;simulation.residents.forEach(f=>f.spriteReady=false);uploadSprites();updateMeta();}persist();}));$('#quality').addEventListener('change',e=>{settings.quality=e.target.value;resize();persist();});const hint=()=>{if(!sound.active)toast('点击底栏喇叭即可试听');};$('#water-type').addEventListener('change',e=>{settings.water=e.target.value!=='off';if(settings.water)settings.waterType=e.target.value;sound.configure(settings);persist();hint();});$('#music').addEventListener('change',e=>{settings.music=e.target.value;sound.configure(settings);persist();hint();});document.querySelectorAll('[data-sound]').forEach(input=>input.addEventListener('change',()=>{settings[input.dataset.sound]=input.checked;sound.configure(settings);persist();hint();}));document.querySelectorAll('[data-vol]').forEach(input=>input.addEventListener('input',()=>{settings[input.dataset.vol]=Number(input.value);sound.configure(settings);scheduleSave();}));$('#volume').addEventListener('input',e=>{settings.volume=Number(e.target.value);sound.configure(settings);scheduleSave();});$('#fullscreen').addEventListener('click',async()=>{dialog.close();setZen(true);try{await document.documentElement.requestFullscreen();}catch{toast('已进入沉浸模式，此浏览器暂不支持全屏');}});}
+function renderSettings(){
+  const residents = [['turtles', '小乌龟', '两位慢悠悠的池塘住客'], ['crabs', '小螃蟹', '在池边石头上横着走，一有动静就钻进水里'], ['silverCarp', '青鲢鱼', '银鳞结伴，穿梭于锦鲤之间'], ['butterflies', '蝴蝶与蜻蜓', '晴日蝶舞，蜻蜓点水，夜里萤火点点'], ['names', '显示锦鲤名字', '在水面认出你的每一位朋友']];
+  const toggleRow = (k, n, d) => `<div class="setting-row"><div>${n}<small>${d}</small></div><input data-setting="${k}" type="checkbox" aria-label="${n}" ${settings[k] ? 'checked' : ''}/></div>`;
+  // 诗句的文字是「显示诗句」的下级：开关关掉，三行输入框一起收起。
+  const verseBody = toggleRow('verseOn', '显示诗句', '左侧竖排的两句诗与印章')
+    + `<div class="sub-block${settings.verseOn ? '' : ' is-off'}" id="verse-sub">`
+    + `<div class="setting-row sub"><div>上句<small>最多 7 字</small></div><input data-verse="verseA" type="text" maxlength="7" value="${settings.verseA}" aria-label="上句"/></div>`
+    + `<div class="setting-row sub"><div>下句<small>最多 7 字</small></div><input data-verse="verseB" type="text" maxlength="7" value="${settings.verseB}" aria-label="下句"/></div>`
+    + `<div class="setting-row sub"><div>印章<small>最多 4 字，逐字竖排</small></div><input data-verse="seal" type="text" maxlength="4" value="${settings.seal}" aria-label="印章"/></div>`
+    + `</div>`;
+  const waterOptions = [['stream', '溪流潺潺'], ['spring', '山泉叮咚'], ['cascade', '叠水瀑声'], ['lapping', '池水轻漾'], ['bamboo', '竹筒惊鹿'], ['off', '关闭']];
+  const musicOptions = [['guqin', '古琴'], ['bowl', '颂钵'], ['chimes', '风铃'], ['off', '关闭']];
+  // 总音量是这一组的主项，其余几路声音都挂在它下面。
+  const soundBody = `<div class="setting-row"><div>总音量<small>底栏喇叭可随时开关全部声音</small></div><input id="volume" type="range" aria-label="总音量" min="0" max="1" step="0.05" value="${settings.volume}"/></div>`
+    + `<div class="setting-row sub"><div>水声<small>池畔流水，独立于天气</small></div><div class="sound-ctl"><input data-vol="waterVol" type="range" aria-label="水声音量" min="0" max="1" step="0.05" value="${settings.waterVol}"/><select id="water-type" aria-label="水声">${waterOptions.map(([v, n]) => `<option value="${v}" ${(settings.water ? settings.waterType : 'off') === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div></div>`
+    + `<div class="setting-row sub"><div>天气环境音<small>晴有鸟鸣、阴闻布谷、雨落池塘、雪有寒鸦、夏夜虫蛙</small></div><div class="sound-ctl"><input data-vol="weatherVol" type="range" aria-label="天气环境音音量" min="0" max="1" step="0.05" value="${settings.weatherVol}"/><input data-sound="weatherSound" type="checkbox" aria-label="天气环境音" ${settings.weatherSound ? 'checked' : ''}/></div></div>`
+    + `<div class="setting-row sub"><div>禅意音乐<small>稀疏几声，不扰清静</small></div><div class="sound-ctl"><input data-vol="musicVol" type="range" aria-label="禅意音乐音量" min="0" max="1" step="0.05" value="${settings.musicVol}"/><select id="music" aria-label="禅意音乐">${musicOptions.map(([v, n]) => `<option value="${v}" ${settings.music === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div></div>`
+    + `<div class="setting-row sub"><div>互动水声<small>投喂、吞食与轻点水面的声音</small></div><input data-sound="sfx" type="checkbox" aria-label="互动水声" ${settings.sfx ? 'checked' : ''}/></div>`;
+
+  prefsHost().innerHTML = `<p class="description">把这方小天地，调成你喜欢的模样。</p>`
+    + `<div class="setting-row"><div>游动速度<small>慢一点，也是一种生活</small></div><input id="swim-speed" type="range" aria-label="游动速度" min="0.3" max="2" step="0.1" value="${settings.speed}"/></div>`
+    + foldGroup('residents', '池塘住客', residents.map(([k, n, d]) => toggleRow(k, n, d)).join(''), true)
+    + `<div class="setting-row"><div>画面品质<small>节能模式限制至 30 帧</small></div><select id="quality" aria-label="画面品质"><option value="high" ${settings.quality === 'high' ? 'selected' : ''}>细腻 · 60 帧</option><option value="eco" ${settings.quality === 'eco' ? 'selected' : ''}>节能 · 30 帧</option></select></div>`
+    + foldGroup('verse', '诗句', verseBody, true)
+    + foldGroup('sound', '声音', soundBody, false)
+    + (window.PondHost ? `<div class="setting-row"><div>手机动态壁纸<small id="wallpaper-note">${PondHost.isWallpaperActive() ? '池塘已在桌面上 · 轻点桌面空白处投喂' : '把池塘设为手机桌面背景'}${PondHost.wallpaperStatus?.() ? `<br>壁纸状态：${PondHost.wallpaperStatus().replace(/[<>&]/g, '')}` : ''}</small></div><button id="set-wallpaper" class="secondary">设为壁纸</button></div>` : '')
+    + `<div class="form-actions"><span class="small-note">锦鲤和投喂记录会自动保存在此设备</span><button id="fullscreen" class="secondary">全屏观鱼</button></div>`
+    + `<div class="dialog-footer">空格：在池塘中央投喂（先点水面）<br>H：隐藏 / 显示界面 · Esc：退出面板或沉浸模式<br>根据「碧潭观鱼」视频独立复刻，非原作者官方作品。</div>`;
+
+  $('#set-wallpaper')?.addEventListener('click', () => PondHost.setWallpaper());
+  $('#swim-speed').addEventListener('input', e => { settings.speed = Number(e.target.value); scheduleSave(); });
+  document.querySelectorAll('[data-verse]').forEach(input => input.addEventListener('input', () => {
+    const k = input.dataset.verse;
+    settings[k] = (input.value || '').replace(/\s+/g, '').slice(0, k === 'seal' ? 4 : 7);
+    applyVerse(); scheduleSave();
+  }));
+  document.querySelectorAll('[data-setting]').forEach(input => input.addEventListener('change', () => {
+    settings[input.dataset.setting] = input.checked;
+    if (input.dataset.setting === 'verseOn') $('#verse-sub')?.classList.toggle('is-off', !input.checked);
+    applyGrade(); applyVerse();
+    if (input.dataset.setting === 'silverCarp') { simulation.residentsOn = settings.silverCarp; simulation.residents.forEach(f => f.spriteReady = false); uploadSprites(); updateMeta(); }
+    persist();
+  }));
+  $('#quality').addEventListener('change', e => { settings.quality = e.target.value; resize(); persist(); });
+  const hint = () => { if (!sound.active) toast('点击底栏喇叭即可试听'); };
+  $('#water-type').addEventListener('change', e => { settings.water = e.target.value !== 'off'; if (settings.water) settings.waterType = e.target.value; sound.configure(settings); persist(); hint(); });
+  $('#music').addEventListener('change', e => { settings.music = e.target.value; sound.configure(settings); persist(); hint(); });
+  document.querySelectorAll('[data-sound]').forEach(input => input.addEventListener('change', () => { settings[input.dataset.sound] = input.checked; sound.configure(settings); persist(); hint(); }));
+  document.querySelectorAll('[data-vol]').forEach(input => input.addEventListener('input', () => { settings[input.dataset.vol] = Number(input.value); sound.configure(settings); scheduleSave(); }));
+  $('#volume').addEventListener('input', e => { settings.volume = Number(e.target.value); sound.configure(settings); scheduleSave(); });
+  $('#fullscreen').addEventListener('click', async () => { dialog.close(); setZen(true); try { await document.documentElement.requestFullscreen(); } catch { toast('已进入沉浸模式，此浏览器暂不支持全屏'); } });
+}
+
 function setZen(value){zen=value;document.body.classList.toggle('zen',zen);document.querySelectorAll('.ui').forEach(el=>el.inert=zen);$('#exit-zen').hidden=!zen;$('#zen-button').setAttribute('aria-label',zen?'退出沉浸模式':'进入沉浸模式');}
 $('#zen-button').addEventListener('click',()=>setZen(true));$('#exit-zen').addEventListener('click',()=>{setZen(false);if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});});
 document.addEventListener('keydown',e=>{if(['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName))return;if(e.key==='Escape'&&!dialog.open)setZen(false);if(e.key.toLowerCase()==='h'&&!dialog.open)setZen(!zen);});

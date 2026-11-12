@@ -208,7 +208,7 @@ vec3 grade(vec3 c, vec2 screenPx, vec2 view){
 precision highp float;
 uniform sampler2D uScene, uSurface, uFloat, uNoise, uCloud;
 uniform vec4 uMoonDisc; uniform vec3 uBedU, uBedV; uniform vec2 uView;
-uniform float uRefract, uGlint, uSkyK, uVignette, uMoon, uBright, uSat, uShade, uTime, uCloudShade, uMist, uFlash;
+uniform float uRefract, uGlint, uSkyK, uVignette, uMoon, uMoonReflect, uBright, uSat, uShade, uTime, uCloudShade, uMist, uFlash;
 uniform vec3 uGlintColor, uSky, uTint, uSun;
 ${GRADE}
 in vec2 vUv; out vec4 o;
@@ -228,8 +228,10 @@ void main(){
   col = mix(col, uSky, clamp(uSkyK * (1. + length(g) * 5.) + dim * .06, 0., .6));
   vec3 glint = uGlintColor * sf.b * 2.4 * uGlint * (1. - cloud * .92), night = vec3(0.);
   if (uMoon > 0.) {
-    // The moon mirrored in the pond: looked up where the tilted surface points, so waves break it apart.
-    vec2 px = vUv * uView, rp = px + g * 22., d = (rp - uMoonDisc.xy) / uMoonDisc.z;
+    // The moon mirrored in the pond. Every pixel looks up along its own slope, exactly as the bed below is refracted,
+    // so the disc is bent by the ripples — but only a little: the moon stays a moon, and the waves rearrange its edge
+    // instead of smearing it across the water.
+    vec2 px = vUv * uView, rp = px + g * 5., d = (rp - uMoonDisc.xy) / uMoonDisc.z;
     float r = length(d), s = sqrt(max(0., 1. - d.y * d.y)), k = cos(uMoonDisc.w), illum = .5 - .5 * k;
     // Phase: the terminator is a half-ellipse; uMoonDisc.w runs 0 (new) → pi (full) → 2pi.
     float lit = uMoonDisc.w < 3.14159 ? smoothstep(k * s - .07, k * s + .07, d.x) : smoothstep(-k * s + .07, -k * s - .07, d.x);
@@ -241,16 +243,20 @@ void main(){
     maria += 1. - smoothstep(.18, .34, length(d - vec2(-.52, -.06)));
     maria += 1. - smoothstep(.08, .2, length(d - vec2(-.08, -.4)));
     float face = (1. - .24 * min(maria, 1.)) * (.9 + .16 * texture(uNoise, d * .5 + .37).r);
-    // Ripples crossing the reflection light one side of each wave and shade the other.
-    float disc = (1. - smoothstep(.93, 1.03, r)) * mix(.05, 1., lit) * face * (1. - .18 * r * r) * clamp(1. + dot(-g, vec2(-.6, .6)) * 1.4, .35, 1.6);
-    night += vec3(.93, .92, .86) * disc * .78 + vec3(.6, .72, 1.) * (exp(-r * r / 6.) * .2 + exp(-r / 3.5) * .08) * (.3 + .7 * illum);
+    // It is light, not a decal: a facet leaning toward the moon gives its light back, one leaning away goes dark.
+    vec2 toMoon = normalize(uMoonDisc.xy - px + 1e-4);
+    float facet = clamp(.80 + dot(-g, toMoon) * 4.2, .18, 1.45);
+    float disc = (1. - smoothstep(.93, 1.03, r)) * mix(.05, 1., lit) * face * (1. - .18 * r * r) * facet;
+    // Both the disc and the soft halo around it answer the moonlight slider, and the reflection switch turns them off
+    // while leaving the rest of the night alone.
+    float halo = exp(-r * r / 6.) * .2 + exp(-r / 3.5) * .08;
+    night += (vec3(.95, .94, .88) * disc * 1.7 + vec3(.6, .72, 1.) * halo * (.3 + .7 * illum)) * uMoonReflect * uMoonlight;
     // Moonlight glitter gathers round the reflection; a few faint stars twinkle between the waves.
     glint *= (.3 + exp(-length((px - uMoonDisc.xy) / uMoonDisc.z) / 5.) * 1.3) * (.3 + .7 * illum);
     vec2 cell = floor(rp / 38.), f = fract(rp / 38.) - .5, sp = vec2(hash(cell + 3.1), hash(cell + 7.7)) - .5;
     float h = hash(cell), q = dot(f - sp * .7, f - sp * .7);
     if (h > .965) night += vec3(.8, .86, 1.) * exp(-q * 420.) * (.55 + .45 * sin(uTime * (1. + h * 3.) + h * 40.)) * (.6 + 3. * (h - .965));
     // Moonlight on the moving water: every wave facet turned toward the moon's reflection catches its light.
-    vec2 toMoon = normalize(uMoonDisc.xy - px + 1e-4);
     float reach = exp(-length(px - uMoonDisc.xy) / (uMoonDisc.z * 16.));
     night += vec3(.55, .66, .9) * (max(0., dot(-g, toMoon)) * .6 + length(g) * .14) * (.35 + .65 * reach) * (.4 + .6 * illum);
     night = (night + glint) * uMoon * (1. - cloud * .9);
@@ -263,15 +269,6 @@ void main(){
   float l = dot(col, vec3(.299, .587, .114));
   col = mix(vec3(l), col, uSat) * uBright * uTint + night;
   col = grade(col, vUv * uView, uView);
-  // The moon's reflection on the water: a path running down from the disc. Every wave bends it sideways (the slope
-  // shifts the path) and brightens or dims it, so it swims with the ripples instead of sitting still on the surface.
-  if (uMoon > 0. && uMoonlight > 0.) {
-    vec2 mpx = vUv * uView;
-    float sway = mpx.x + g.x * 52. + g.y * 14.;
-    float mpath = exp(-pow((sway - uMoonDisc.xy.x) / (uMoonDisc.z * 1.9), 2.)) * smoothstep(uMoonDisc.y + 30., 0., mpx.y);
-    float weave = .30 + .70 * (.5 + .5 * sin(g.y * 42. + uTime * 1.5));
-    col += vec3(.78, .86, 1.) * mpath * weave * uMoonlight * .95;
-  }
   // Rain mist drifting low over the water in slow banks.
   if (uMist > 0.) col = mix(col, uSky * uBright * 1.08, mistAt(vUv * uView, uTime) * uMist);
   col += uFlash * (col * 1.3 + vec3(.1, .12, .16));
@@ -663,7 +660,7 @@ void main(){
       gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, canvas.width, canvas.height);
       p = P.final; gl.useProgram(p);
       gl.uniform2f(p.u('uView'), w, h); gl.uniform1f(p.u('uRefract'), env.refract); gl.uniform1f(p.u('uGlint'), env.glint); gl.uniform1f(p.u('uSkyK'), env.skyK);
-      gl.uniform1f(p.u('uVignette'), env.vignette); gl.uniform1f(p.u('uMoon'), env.moon); gl.uniform1f(p.u('uBright'), env.bright); gl.uniform1f(p.u('uSat'), env.sat); gl.uniform1f(p.u('uShade'), env.shade);
+      gl.uniform1f(p.u('uVignette'), env.vignette); gl.uniform1f(p.u('uMoon'), env.moon); gl.uniform1f(p.u('uMoonReflect'), env.moonReflect ?? 1); gl.uniform1f(p.u('uBright'), env.bright); gl.uniform1f(p.u('uSat'), env.sat); gl.uniform1f(p.u('uShade'), env.shade);
       gl.uniform3fv(p.u('uGlintColor'), env.glintColor); gl.uniform3fv(p.u('uSky'), env.sky); gl.uniform3fv(p.u('uTint'), env.tint); gl.uniform3fv(p.u('uSun'), env.sun);
       gl.uniform1f(p.u('uCloudShade'), env.cloudShade); gl.uniform1f(p.u('uMist'), env.mist || 0); gl.uniform1f(p.u('uFlash'), env.flash || 0);
       gl.uniform1f(p.u('uContrast'), env.contrast ?? 1); gl.uniform1f(p.u('uBrightness'), env.brightness ?? 1); gl.uniform1f(p.u('uHue'), env.hue || 0); gl.uniform1f(p.u('uMoonlight'), env.moonlight || 0);
@@ -672,7 +669,6 @@ void main(){
       bindTex(0, state.scene.tex); gl.uniform1i(p.u('uScene'), 0); bindTex(1, state.surface.tex); gl.uniform1i(p.u('uSurface'), 1);
       bindTex(2, noiseTex); gl.uniform1i(p.u('uNoise'), 2); bindTex(3, floatTex); gl.uniform1i(p.u('uFloat'), 3); bindTex(4, state.cloud.tex); gl.uniform1i(p.u('uCloud'), 4);
       drawQuad();
-      // Crabs that have ducked under a leaf: drawn beneath the leaves, so the leaf's own edge is what hides them.
       // Crabs that have ducked under a leaf: drawn beneath the leaves, so the leaf's own edge is what hides them.
       if (batches.crawl.ni) { gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA); drawBatch(batches.crawl, 0, 0, 0); }
       // Leaves and flowers above the water.

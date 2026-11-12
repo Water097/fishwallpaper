@@ -144,3 +144,21 @@ test('岸上的螃蟹受惊只往荷叶或自家石头边上跑，不往池心�
   const toRim = Math.hypot(c.goal[0] - home[0], c.goal[1] - home[1]) < 140;
   assert.ok(toLeaf || toRim, `逃跑目标 (${c.goal[0].toFixed(0)}, ${c.goal[1].toFixed(0)}) 既不在荷叶下也不在石头边`);
 });
+
+test('月亮按真实时间东升西落：黄昏在左、午夜居中最高、拂晓在右', () => {
+  const scene = pond();
+  const at = (h) => scene.moonClock(1000, 800, new Date(2026, 10, 12, h, 0, 0));
+  const [duskX, duskY] = at(19), [midX, midY] = at(0), [dawnX, dawnY] = at(5);
+  assert.ok(duskX < midX && midX < dawnX, `x 应该从西向东走：${duskX.toFixed(0)} → ${midX.toFixed(0)} → ${dawnX.toFixed(0)}`);
+  assert.ok(duskY > midY && dawnY > midY, '午夜的月亮应该比傍晚和拂晓都高（y 更小）');
+  assert.ok(duskX > 60 && dawnX < 940, '月亮不能跑到画面外');
+});
+
+test('关掉倒影开关，月亮那层光就没有了', () => {
+  const scene = pond();
+  scene.setLook('sunny', true, 1, { moonlight: 1, moonReflect: true });
+  assert.equal(scene.look.moonReflect, 1);
+  for (let i = 0; i < 30; i++) scene.setLook('sunny', true, 1 / 30, { moonlight: 1, moonReflect: false });
+  assert.ok(scene.look.moonReflect < .05, `倒影开关关到底，剩 ${scene.look.moonReflect.toFixed(3)}`);
+  assert.equal(scene.look.moonlight, 1, '月光本身不该被倒影开关关掉');
+});
