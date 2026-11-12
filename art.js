@@ -71,6 +71,14 @@
       } else if (kind === 'utsuri') {
         const val = fbm(n, x * .06 + ox, v * .9 + oy) + .12 * Math.sin(x * .13 + band) + .35 * smooth(17, 21, x) * smooth(-.15, .15, split * v + (x - 26) * .12);
         out[1] = val - th - .04;
+      } else if (kind === 'showa') {
+        // Showa: a dark fish with broad hi patches and sumi that wraps around them, not just a black koi with spots.
+        const val = fbm(n, x * .07 + ox, v * 1.02 + oy) + .14 * Math.sin(x * .15 + band);
+        out[0] = val - th + .02;
+        out[1] = fbm(n2, x * .15 + ox, v * 1.6 + oy, 3) - .48;
+      } else if (kind === 'asagi') {
+        // Asagi / Shusui: pale blue-grey back, red flushing along both flanks in a fine, broken net.
+        out[0] = (smooth(.32, .86, Math.abs(v)) + .2 * Math.sin(x * .22 + band) + .12 * (fbm(n, x * .3 + ox, v * 2 + oy) - .5) - .66) * .09;
       } else if (kind === 'tancho') out[0] = (tr - Math.hypot(x - tx, y) - (n(x * .5 + ox, y * .5 + oy) - .5) * 1.4) * .06;
     };
   }
@@ -85,7 +93,7 @@
     const base = hex(pal.base), hiC = hex(pal.spot), sumiC = hex(pal.second || pal.spot), finC = hex(pal.fin);
     // Hi is deepest in the middle of a patch and turns orange toward its edges.
     const hiDeep = hiC.map(c => c * .86), hiEdge = hiC.map((c, i) => mix(c, [238, 128, 74][i], .35));
-    const metal = kind === 'ogon', dark = kind === 'karasu', silver = kind === 'silvercarp', red = kind === 'benigoi', patterned = ['kohaku', 'sanke', 'utsuri', 'tancho'].includes(kind);
+    const metal = kind === 'ogon', dark = kind === 'karasu', silver = kind === 'silvercarp', red = kind === 'benigoi', patterned = ['kohaku', 'sanke', 'utsuri', 'tancho', 'showa', 'asagi'].includes(kind);
     const P = [0, 0], Q = [0, 0], T = [0, 0], ped = [0, 0];
     pattern(-26, 0, 3, ped);
     for (let py = 0; py < H; py++) {

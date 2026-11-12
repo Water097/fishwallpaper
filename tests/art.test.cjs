@@ -64,3 +64,15 @@ test('青鲢体形比锦鲤修长，背脊深青、两侧腹缘白色', () => {
     assert.ok(sample(-33, 0).rgba[3] > 200, '细长尾柄应连到尾鳍');
   }
 });
+test('伙伴页提供的 12 种花色都能画出鱼身，且彼此颜色不同', () => {
+  assert.equal(core.PALETTES.length, 12);
+  const seen = new Set();
+  for (let p = 0; p < core.PALETTES.length; p++) {
+    const L = art.fishLayers(p, 42, 3), d = L.albedo.data;
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 200) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+    assert.ok(n > 500, `${core.PALETTES[p].name} 没画出鱼身`);
+    seen.add(`${Math.round(r / n / 8)}:${Math.round(g / n / 8)}:${Math.round(b / n / 8)}`);
+  }
+  assert.ok(seen.size >= 10, `12 种花色里只有 ${seen.size} 种可区分，配色太接近`);
+});

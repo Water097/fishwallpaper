@@ -7,7 +7,12 @@
     { name: '白写', base: '#efeee5', spot: '#1e2727', fin: '#ecebe3', kind: 'utsuri' },
     { name: '丹顶', base: '#f6f3ea', spot: '#cf3f2b', fin: '#f2f1e9', kind: 'tancho' },
     { name: '墨鲤', base: '#2a3130', spot: '#161c1d', fin: '#444c49', kind: 'karasu' },
-    { name: '纯红', base: '#cb3025', spot: '#cb3025', fin: '#c9382c', kind: 'benigoi' }
+    { name: '纯红', base: '#cb3025', spot: '#cb3025', fin: '#c9382c', kind: 'benigoi' },
+    { name: '昭和三色', base: '#2c3334', spot: '#c8492c', second: '#12191a', fin: '#4b5450', kind: 'showa' },
+    { name: '浅黄', base: '#9db7c3', spot: '#d2763c', fin: '#c2d3d9', kind: 'asagi' },
+    { name: '秋翠', base: '#7898ad', spot: '#c65a33', second: '#1d3f5c', fin: '#a6c2ce', kind: 'asagi' },
+    { name: '孔雀', base: '#e0a14c', spot: '#c9532b', second: '#2a3030', fin: '#eec378', kind: 'sanke' },
+    { name: '白鲤', base: '#f4f3ec', spot: '#e9e7dd', fin: '#f7f6f0', kind: 'kohaku' }
   ];
   const SILVER_CARP = { name: '青鲢', base: '#184140', spot: '#184140', fin: '#a9c4bd', kind: 'silvercarp' };
   const fishPalette = f => f.species === 'silvercarp' ? SILVER_CARP : PALETTES[f.palette] || PALETTES[0];

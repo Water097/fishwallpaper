@@ -15,6 +15,7 @@ const ICONS={
   'sound-off':'M11 4 5 9H2v6h3l6 5V4Z M16 9l6 6 M22 9l-6 6',
   sound:'M11 4 5 9H2v6h3l6 5V4Z M15 8a6 6 0 0 1 0 8 M18 5a10 10 0 0 1 0 14',
   expand:'M8 3H3v5 M16 3h5v5 M21 16v5h-5 M8 21H3v-5',
+  waves:'M2 8c2.5-2 4.5-2 7 0s4.5 2 7 0 4.5-2 6 0 M2 14c2.5-2 4.5-2 7 0s4.5 2 7 0 4.5-2 6 0 M2 20c2.5-2 4.5-2 7 0s4.5 2 7 0 4.5-2 6 0',
   close:'M6 6l12 12 M18 6 6 18'
 };
 const icon=n=>`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[n]||ICONS.sun}"/></svg>`;
@@ -23,12 +24,29 @@ icons();
 // 右上角「时间与天气」卡片的几种版式。样式名与 CSS 里的 data-clock-style 一一对应。
 const CLOCK_STYLES=[['paper','纸笺'],['glass','琉璃'],['ink','墨韵'],['plain','素影'],['strip','横幅']];
 const clockStyleName=k=>(CLOCK_STYLES.find(s=>s[0]===k)||CLOCK_STYLES[0])[1];
+// 设置弹窗固定六栏：所有内容都从这里切换，组内的上下级仍由 foldGroup 负责。
+const PANEL_TABS=[
+  ['water','水景','waves','POND · NATURAL SPACE','栖水池塘'],
+  ['fish','伙伴','fish','EVERY FISH HAS A STORY','锦鲤工坊'],
+  ['weather','天气','sun','WEATHER & MOONLIGHT','一池天气'],
+  ['sound','声音','sound','SOUNDS OF THE POND','池畔有声'],
+  ['record','记录','trophy','A LITTLE POND DIARY','池畔小记'],
+  ['settings','设置','sliders','MAKE YOURSELF AT HOME','池塘设置']
+];
+const panelTabInfo=k=>PANEL_TABS.find(t=>t[0]===k)||PANEL_TABS[0];
+// 水景库目前只有一张底图。其余位置留成占位卡，以后加图只要往数组里填一条真数据。
+const BACKDROPS=[
+  {id:'jade',name:'碧潭初霁',desc:'浅碧池水 · 荷叶扶疏',img:'assets/pond.jpg'},
+  ...['幽涧石潭','青苔古池','月夜寒波','秋荷听雨','竹影清泉','雪后初晴','墨池观鱼','溪畔浅滩']
+    .map((name,i)=>({id:`soon-${i}`,name,desc:'敬请期待 · 后续开放',soon:true}))
+];
 let saved=null;try{saved=sanitizeSave(JSON.parse(localStorage.getItem('bichi-pond-v1')??localStorage.getItem('xitan-pond-v1')??localStorage.getItem('bitan-pond-v1')));}catch{}
-const defaults={weather:'sunny',speed:1,turtles:true,crabs:true,silverCarp:true,butterflies:true,names:false,quality:'high',autoWeather:false,location:null,night:false,water:true,waterType:'stream',waterVol:.6,weatherSound:true,weatherVol:.6,music:'guqin',musicVol:.5,sfx:true,volume:.7,rainAmount:.5,snowAmount:.5,soundOn:false,moonlight:.55,moonReflect:true,verseOn:true,verseA:'水清鱼读月',verseB:'花静鸟谈天',seal:'闲观',dayContrast:1,dayBright:1,dayHue:0,nightContrast:1,nightBright:1,nightHue:0,clockOn:true,clockStyle:'paper'};
+const defaults={weather:'sunny',speed:1,turtles:true,crabs:true,silverCarp:true,butterflies:true,names:false,quality:'high',autoWeather:false,location:null,night:false,water:true,waterType:'stream',waterVol:.6,weatherSound:true,weatherVol:.6,music:'guqin',musicVol:.5,sfx:true,volume:.7,rainAmount:.5,snowAmount:.5,soundOn:false,moonlight:.55,moonReflect:true,verseOn:true,verseA:'水清鱼读月',verseB:'花静鸟谈天',seal:'闲观',dayContrast:1,dayBright:1,dayHue:0,nightContrast:1,nightBright:1,nightHue:0,clockOn:true,clockStyle:'paper',backdrop:'jade'};
 const settings={...defaults};
 // Copy valid values from a stored settings object (this page's save, or one written by another window).
 function readSettings(src){for(const key of ['turtles','crabs','silverCarp','butterflies','names','autoWeather','night','sfx','water','weatherSound','soundOn','verseOn','moonReflect','clockOn'])if(typeof src[key]==='boolean')settings[key]=src[key];
   if(CLOCK_STYLES.some(([v])=>v===src.clockStyle))settings.clockStyle=src.clockStyle;
+  if(BACKDROPS.some(b=>b.id===src.backdrop&&!b.soon))settings.backdrop=src.backdrop;
   if(PondAudio.MUSIC.includes(src.music))settings.music=src.music;if(PondAudio.WATERS.includes(src.waterType))settings.waterType=src.waterType;for(const key of ['volume','waterVol','weatherVol','musicVol','rainAmount','snowAmount'])if(Number.isFinite(src[key]))settings[key]=clamp(src[key],0,1);
   if(['sunny','cloudy','rain','snow'].includes(src.weather))settings.weather=src.weather;
   settings.speed=clamp(Number(src.speed)||1,.3,2);
@@ -79,7 +97,7 @@ function applyExternalSave(raw){let data;try{data=JSON.parse(raw);}catch{return;
     simulation.fish.splice(0,simulation.fish.length,...next);simulation.residentsOn=settings.silverCarp;simulation.allFish.forEach((f,i)=>{if(f.spriteCell!==i)f.spriteReady=false;});uploadSprites();
     if(settings.quality!==quality)resize();applyWeather();applyClockCard();if(settings.autoWeather&&!auto)fetchWeather();syncSound();
   }else for(const src of s.fish){const f=byId.get(src.id);if(f)f.eaten=Math.max(f.eaten,src.eaten);}
-  editSig=editSignature();updateMeta();if(activePanel==='ranking')renderRanking();}
+  editSig=editSignature();updateMeta();if(activePanel==='record')renderRanking();}
 window.__pondSync=applyExternalSave;
 addEventListener('storage',e=>{if(e.key==='bichi-pond-v1'&&e.newValue)applyExternalSave(e.newValue);});
 function scheduleSave(){clearTimeout(persistTimer);persistTimer=setTimeout(persist,500);}
@@ -180,35 +198,103 @@ document.querySelectorAll('[data-panel]').forEach(b=>b.addEventListener('click',
 $('.close-panel').addEventListener('click',()=>dialog.close());
 dialog.addEventListener('click',e=>{if(e.target===dialog){const r=dialog.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)dialog.close();}});
 dialog.addEventListener('close',()=>{activePanel='';previewCanvas=null;previewFish=null;citySearchController?.abort();});
-// 设置弹窗停在上次退出时的页签，而不是每次都从池塘页开始。
-let prefsTab=(()=>{try{return localStorage.getItem('bichi-prefs-tab')==='weather'?'weather':'settings';}catch{return 'settings';}})();
-function savePrefsTab(){try{localStorage.setItem('bichi-prefs-tab',prefsTab);}catch{}}
-// 天气页已经收进「设置」弹窗的天气页签里，判断现在是不是正停在那一页——天气拉回来之后要刷新的就是它。
-const weatherTabOpen=()=>activePanel==='weather'||(activePanel==='settings'&&prefsTab==='weather');
-const prefsHost=()=>$('#prefs-body')||$('#panel-content');
-// 天气与池塘设置同住一个弹窗，两个页签切换；从底栏哪个按钮进来就落在哪一页。
-function renderPrefs(){
-  $('#panel-title').textContent='池塘设置';
-  $('#panel-eyebrow').textContent='MAKE YOURSELF AT HOME';
-  $('#panel-content').innerHTML=`<div class="tabs prefs-tabs"><button type="button" class="tab ${prefsTab==='weather'?'selected':''}" data-prefs="weather" aria-pressed="${prefsTab==='weather'}">天气</button><button type="button" class="tab ${prefsTab==='settings'?'selected':''}" data-prefs="settings" aria-pressed="${prefsTab==='settings'}">池塘</button></div><div id="prefs-body"></div>`;
-  $('#panel-content').querySelectorAll('[data-prefs]').forEach(b=>b.addEventListener('click',()=>{prefsTab=b.dataset.prefs;savePrefsTab();renderPrefs();}));
-  (prefsTab==='weather'?renderWeather:renderSettings)();
+// 六个栏位同住一个弹窗：tab 栏和标题固定，内容区独立滚动，外框尺寸不随折叠/展开变化。
+let panelTab=(()=>{try{const v=localStorage.getItem('bichi-panel-tab');return PANEL_TABS.some(t=>t[0]===v)?v:'water';}catch{return 'water';}})();
+function savePanelTab(){try{localStorage.setItem('bichi-panel-tab',panelTab);}catch{}}
+const weatherTabOpen=()=>activePanel==='weather';
+function renderPanelTabs(){
+  $('#panel-tabs').innerHTML=PANEL_TABS.map(([k,n,i])=>`<button type="button" class="panel-tab${panelTab===k?' selected':''}" data-tab="${k}" aria-pressed="${panelTab===k}">${icon(i)}<span>${n}</span></button>`).join('');
+  $('#panel-tabs').querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{panelTab=b.dataset.tab;activePanel=panelTab;savePanelTab();renderPanel();}));
 }
-function openPanel(type){activePanel=type;previewCanvas=null;previewFish=null;
-  if(type==='weather'||type==='settings'){if(type==='weather'){prefsTab='weather';savePrefsTab();}renderPrefs();if(!dialog.open)dialog.showModal();return;}
-  const names={fish:['我的锦鲤','MEET YOUR LITTLE FRIENDS'],ranking:['锦鲤食量榜','A LITTLE APPETITE, A LOT OF JOY']};$('#panel-title').textContent=names[type][0];$('#panel-eyebrow').textContent=names[type][1];({fish:renderFish,ranking:renderRanking})[type]();if(!dialog.open)dialog.showModal();}
+function renderPanel(){
+  const [, , , eyebrow,title]=panelTabInfo(panelTab);
+  $('#panel-eyebrow').textContent=eyebrow;$('#panel-title').textContent=title;
+  renderPanelTabs();
+  ({water:renderWater,fish:renderFish,weather:renderWeather,sound:renderSound,record:renderRanking,settings:renderSettings})[panelTab]();
+  $('#panel-content').scrollTop=0;
+}
+function openPanel(type){previewCanvas=null;previewFish=null;
+  const map={fish:'fish',ranking:'record',weather:'weather'};
+  // 底栏「设置」恢复上次那一栏（首次落在「设置」），另外两个按钮直达自己的内容。
+  panelTab=type==='settings'
+    ? ((()=>{try{const v=localStorage.getItem('bichi-panel-tab');return PANEL_TABS.some(t=>t[0]===v)?v:'settings';}catch{return 'settings';}})())
+    : (map[type]||(PANEL_TABS.some(t=>t[0]===type)?type:panelTab));
+  activePanel=panelTab;savePanelTab();renderPanel();if(!dialog.open)dialog.showModal();}
 function thumbnail(f,width=120,height=60){const c=document.createElement('canvas');c.width=width*2;c.height=height*2;c.style.width=`${width}px`;c.style.height=`${height}px`;const context=c.getContext('2d');context.scale(2,2);const s=Math.min(f.size*.95,width*.86/96);PondScene.drawKoi2D(context,{...f,phase:1},fishCanvas(f),sprites,width*.5+12*s,height*.5-1.4*s,-.12,s,.35);return c;}
-function renderFish(){const content=$('#panel-content');content.innerHTML=`<p class="description">为你的池塘添一尾锦鲤。选一种花色，取一个好名字。</p><div class="pond-summary"><span class="status-dot"></span><span id="fish-count"></span><span class="meta-divider"></span><span id="fed-count"></span></div><div class="fish-preview"><canvas id="preview" width="880" height="290" aria-label="锦鲤外观预览"></canvas><span class="preview-label">一鱼一色 · 各有欢喜</span></div><div class="form-row"><label>锦鲤花色</label><div class="palette">${PALETTES.map((p,i)=>`<button type="button" class="swatch ${i===0?'selected':''}" style="background:${p.spot}" data-palette="${i}" aria-label="${p.name}" aria-pressed="${i===0}"></button>`).join('')}</div><span id="palette-name" class="small-note">红白</span></div><div class="form-row"><label for="fish-size">锦鲤大小</label><input id="fish-size" type="range" min="0.45" max="1.5" step="0.05" value="0.9"/><button id="new-pattern" class="edit-fish">换个花纹 ↻</button></div><div class="form-row paint-tools"><label for="paint-toggle">手绘花纹</label><input id="paint-toggle" type="checkbox" aria-label="手绘花纹"/><span class="small-note">开启后在鱼身涂画</span><input id="paint-color" type="color" value="#bc5036" aria-label="画笔颜色"/><button id="clear-paint" type="button" class="edit-fish">清除</button></div><form id="add-fish-form"><div class="form-row"><label for="fish-name">给它起名</label><input id="fish-name" type="text" maxlength="12" placeholder="例如：小满、如意、听雨" autocomplete="off"/></div><div class="form-actions"><span class="small-note">它会记住你投下的每一粒鱼食</span><button class="primary" type="submit">放入池塘 ＋</button></div></form><h3>我的小伙伴 <span id="collection-count" class="small-note"></span></h3><div class="fish-grid" id="fish-grid"></div>`;
+// 水景：目前只有一张底图，其余留给以后陆续增加；选中态与存档都先按多背景的数据结构来做。
+function renderWater(){
+  $('#panel-content').innerHTML = `<p class="water-intro">一方池塘，让疲惫在此随波荡散，一片水色。</p>`
+    + `<div class="backdrop-grid">${BACKDROPS.map(b=>`<button type="button" class="backdrop-card${b.soon?' is-soon':''}${settings.backdrop===b.id?' selected':''}" data-backdrop="${b.id}" ${b.soon?'disabled':''} aria-pressed="${settings.backdrop===b.id}">`
+      + (b.img?`<img class="backdrop-thumb" src="${b.img}" alt=""/>`:`<span class="backdrop-thumb soon"></span>`)
+      + `<span class="backdrop-info"><strong>${b.name}</strong><small>${b.desc}</small></span>`
+      + (settings.backdrop===b.id?'<span class="backdrop-badge">使用中</span>':b.soon?'<span class="backdrop-badge soon-badge">待开放</span>':'') + `</button>`).join('')}</div>`
+    + `<div class="dialog-footer">目前只有「碧潭初霁」一方水景可以选用，其余位置留给以后陆续增加的背景。</div>`;
+  document.querySelectorAll('.backdrop-card[data-backdrop]').forEach(btn=>btn.addEventListener('click',()=>{
+    const item=BACKDROPS.find(b=>b.id===btn.dataset.backdrop);if(!item||item.soon)return;
+    settings.backdrop=item.id;persist();renderWater();toast(`已选用「${item.name}」`);
+  }));
+}
+// 伙伴：左侧是池中的伙伴列表，右侧是创作台。弹窗尺寸固定，列表与内容各自滚动。
+function renderFish(){const content=$('#panel-content');content.innerHTML=`
+  <div class="fish-workbench">
+    <aside class="fish-sidebar">
+      <div class="side-head"><span>池中伙伴</span><strong id="collection-count">${simulation.fish.length} / 60</strong></div>
+      <button type="button" id="focus-create" class="primary block">＋ 创作新锦鲤</button>
+      <div class="side-label">查找伙伴</div>
+      <input id="fish-search" type="search" placeholder="输入名字或花色" aria-label="查找伙伴" autocomplete="off"/>
+      <div class="fish-list" id="fish-list"></div>
+      <div class="pond-summary side-summary"><span class="status-dot"></span><span id="fish-count"></span><span class="meta-divider"></span><span id="fed-count"></span></div>
+      <p class="side-foot">池塘最多可容纳 60 尾锦鲤</p>
+    </aside>
+    <section class="fish-studio">
+      <div class="studio-head"><span class="eyebrow">全新创作</span><h3>让灵感，游进池塘。</h3></div>
+      <div class="fish-preview studio-preview"><span class="preview-label">实时预览</span><canvas id="preview" width="880" height="290" aria-label="锦鲤外观预览"></canvas><span class="preview-hint">挑选花色，也可以亲手画一笔。</span></div>
+      <div class="studio-tools"><label for="fish-size">锦鲤大小</label><input id="fish-size" type="range" min="0.45" max="1.5" step="0.05" value="0.9"/><button type="button" id="new-pattern" class="edit-fish">换个花纹 ↻</button></div>
+      <div class="studio-cols">
+        <div class="palette-block"><h4>底色与花纹</h4><div class="palette-grid" id="palette-grid">${PALETTES.map((p,i)=>`<button type="button" class="palette-tile${i===0?' selected':''}" data-palette="${i}" aria-label="${p.name}" aria-pressed="${i===0}"><span class="tile-thumb" data-thumb="${i}"></span><span>${p.name}</span></button>`).join('')}</div></div>
+        <div class="paint-block"><h4>手绘工作台</h4>
+          <label class="paint-check"><input id="paint-toggle" type="checkbox" aria-label="开启画笔"/> 开启画笔</label>
+          <div class="paint-row"><span>画笔颜色</span><input id="paint-color" type="color" value="#bc5036" aria-label="画笔颜色"/><button type="button" id="clear-paint" class="edit-fish">清除</button></div>
+          <p class="paint-note">开启画笔时锦鲤会静静停住，关掉即可看它游动。</p>
+        </div>
+      </div>
+      <form id="add-fish-form" class="studio-actions"><span>准备好了，就让它游入鱼池。</span><input id="fish-name" type="text" maxlength="12" placeholder="为它起名…" autocomplete="off" aria-label="给新锦鲤起名"/><button class="primary" type="submit">加入鱼池</button></form>
+    </section>
+  </div>`;
+  content.querySelectorAll('[data-thumb]').forEach(el=>el.append(thumbnail({...createFish(0,randomSeed(11)),palette:Number(el.dataset.thumb),size:.9},62,34)));
   previewFish={...createFish(0),palette:0,angle:0,size:.9,marks:[]};previewCanvas=$('#preview');
-  content.querySelectorAll('[data-palette]').forEach(b=>b.addEventListener('click',()=>{previewFish.palette=Number(b.dataset.palette);content.querySelectorAll('[data-palette]').forEach(s=>{s.classList.toggle('selected',s===b);s.setAttribute('aria-pressed',s===b);});$('#palette-name').textContent=PALETTES[previewFish.palette].name;}));
+  content.querySelectorAll('[data-palette]').forEach(b=>b.addEventListener('click',()=>{previewFish.palette=Number(b.dataset.palette);content.querySelectorAll('[data-palette]').forEach(s=>{const on=s===b;s.classList.toggle('selected',on);s.setAttribute('aria-pressed',on);});}));
   let painting=false;
   $('#paint-toggle').addEventListener('change',e=>{previewFish.painting=e.target.checked;previewCanvas.style.cursor=previewFish.painting?'crosshair':'default';});
   $('#clear-paint').addEventListener('click',()=>{previewFish.marks=[];});
   function brush(e){if(!previewFish?.painting||!painting)return;const box=previewCanvas.getBoundingClientRect(),scale=previewFish.size*PREVIEW_K;const x=((e.clientX-box.left)*previewCanvas.width/box.width-previewCanvas.width*.53)/scale,y=((e.clientY-box.top)*previewCanvas.height/box.height-previewCanvas.height*.5)/scale;if(x < -32 || x > 32 || Math.abs(y)>12)return;const mark={x,y,r:3,color:$('#paint-color').value};if(previewFish.marks.length<400)previewFish.marks.push(mark);}
   previewCanvas.addEventListener('pointerdown',e=>{painting=true;previewCanvas.setPointerCapture(e.pointerId);brush(e);});previewCanvas.addEventListener('pointermove',brush);previewCanvas.addEventListener('pointerup',()=>painting=false);previewCanvas.addEventListener('pointercancel',()=>painting=false);
   $('#fish-size').addEventListener('input',e=>previewFish.size=Number(e.target.value));$('#new-pattern').addEventListener('click',()=>previewFish.seed=Math.floor(Math.random()*100000));
-  $('#add-fish-form').addEventListener('submit',e=>{e.preventDefault();if(simulation.fish.length>=60)return toast('池塘最多容纳 60 尾锦鲤');const f={...createFish(simulation.fish.length),palette:previewFish.palette,size:previewFish.size,seed:previewFish.seed,marks:previewFish.marks.map(m=>({...m}))};f.name=$('#fish-name').value.trim().slice(0,12)||f.name;simulation.fish.push(f);uploadSprites();$('#fish-name').value='';updateMeta();persist();renderCollection();toast(`${f.name} 已游入池塘`);});renderCollection();updateMeta();}
-function renderCollection(){$('#collection-count').textContent=`/ ${simulation.fish.length} 尾`;const grid=$('#fish-grid');grid.replaceChildren();for(const f of simulation.fish){const tile=document.createElement('div');tile.className='fish-tile';const thumb=document.createElement('div');thumb.className='fish-thumb';thumb.append(thumbnail(f));const foot=document.createElement('div');foot.className='fish-tile-foot';const name=document.createElement('span');name.textContent=f.name;const edit=document.createElement('button');edit.className='edit-fish';edit.textContent='改名';edit.setAttribute('aria-label',`给${f.name}改名`);edit.addEventListener('click',()=>{const input=document.createElement('input');input.type='text';input.value=f.name;input.maxLength=12;input.setAttribute('aria-label','锦鲤新名字');input.style.cssText='padding:5px;min-width:0;font-size:10px';name.replaceWith(input);edit.textContent='保存';edit.setAttribute('aria-label',`保存${f.name}的新名字`);let done=false;const commit=()=>{if(done)return;done=true;f.name=input.value.trim().slice(0,12)||f.name;persist();renderCollection();toast('名字已保存');};edit.onclick=commit;input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();commit();}if(e.key==='Escape'){e.stopPropagation();renderCollection();}});input.focus();input.select();},{once:true});const release=document.createElement('button');release.className='edit-fish release-fish';release.textContent='放生';release.setAttribute('aria-label',`放生${f.name}`);let armed=0;release.addEventListener('click',()=>{if(simulation.fish.length<=1)return toast('池塘里至少留一尾锦鲤');if(!armed){release.textContent='确认放生';release.classList.add('armed');armed=setTimeout(()=>{armed=0;release.textContent='放生';release.classList.remove('armed');},3000);return;}clearTimeout(armed);releaseFish(f);});const actions=document.createElement('span');actions.className='fish-actions';actions.append(edit,release);foot.append(name,actions);tile.append(thumb,foot);grid.append(tile);}}
+  $('#add-fish-form').addEventListener('submit',e=>{e.preventDefault();if(simulation.fish.length>=60)return toast('池塘最多容纳 60 尾锦鲤');const f={...createFish(simulation.fish.length),palette:previewFish.palette,size:previewFish.size,seed:previewFish.seed,marks:previewFish.marks.map(m=>({...m}))};f.name=$('#fish-name').value.trim().slice(0,12)||f.name;simulation.fish.push(f);uploadSprites();$('#fish-name').value='';updateMeta();persist();renderCollection();toast(`${f.name} 已游入池塘`);});
+  $('#fish-search').addEventListener('input',()=>renderCollection());
+  $('#focus-create').addEventListener('click',()=>{$('#fish-name').focus();content.scrollTop=content.scrollHeight;});
+  renderCollection();updateMeta();}
+function renderCollection(){
+  const count=$('#collection-count');if(count)count.textContent=`${simulation.fish.length} / 60`;
+  const list=$('#fish-list');if(!list)return;
+  const q=($('#fish-search')?.value||'').trim().toLowerCase();
+  list.replaceChildren();
+  const shown=simulation.fish.filter(f=>!q||f.name.toLowerCase().includes(q)||(PALETTES[f.palette]?.name||'').toLowerCase().includes(q));
+  if(!shown.length){const empty=document.createElement('p');empty.className='side-empty';empty.textContent='没有找到这位小伙伴';list.append(empty);return;}
+  for(const f of shown){
+    const row=document.createElement('div');row.className='fish-list-row';
+    const thumb=document.createElement('span');thumb.className='fish-list-thumb';thumb.append(thumbnail(f,46,28));
+    const info=document.createElement('div');info.className='fish-list-info';
+    const name=document.createElement('b');name.textContent=f.name;
+    const sub=document.createElement('small');sub.textContent=`${PALETTES[f.palette]?.name||'锦鲤'} · 已食 ${f.eaten} 粒`;
+    info.append(name,sub);
+    const edit=document.createElement('button');edit.className='edit-fish';edit.textContent='改名';edit.setAttribute('aria-label',`给${f.name}改名`);
+    edit.addEventListener('click',()=>{const input=document.createElement('input');input.type='text';input.value=f.name;input.maxLength=12;input.setAttribute('aria-label','锦鲤新名字');input.style.cssText='padding:4px;min-width:0;width:66px;font-size:10px';name.replaceWith(input);edit.textContent='保存';let done=false;const commit=()=>{if(done)return;done=true;f.name=input.value.trim().slice(0,12)||f.name;persist();renderCollection();toast('名字已保存');};edit.onclick=commit;input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();commit();}if(e.key==='Escape'){e.stopPropagation();renderCollection();}});input.focus();input.select();},{once:true});
+    const release=document.createElement('button');release.className='edit-fish release-fish';release.textContent='放生';release.setAttribute('aria-label',`放生${f.name}`);
+    let armed=0;release.addEventListener('click',()=>{if(simulation.fish.length<=1)return toast('池塘里至少留一尾锦鲤');if(!armed){release.textContent='确认';release.classList.add('armed');armed=setTimeout(()=>{armed=0;release.textContent='放生';release.classList.remove('armed');},3000);return;}clearTimeout(armed);releaseFish(f);});
+    row.append(thumb,info,edit,release);list.append(row);
+  }
+}
 // Letting a koi go: it slips away with a ripple; later fish move up one atlas cell, so their sprites are re-uploaded.
 function releaseFish(f){const i=simulation.fish.indexOf(f);if(i<0||simulation.fish.length<=1)return;if(scene){scene.drop(f.x*width,f.y*height,12*scene.scale,.8);scene.wakes.delete(f);}simulation.fish.splice(i,1);simulation.fish.forEach((g,j)=>{if(j>=i)g.spriteReady=false;});uploadSprites();updateMeta();persist();renderCollection();toast(`「${f.name}」已放生，愿它自在悠游`);}
 let rankingTab='eaten';
@@ -216,8 +302,6 @@ const hungerWord=h=>h>=.85?'饿坏了':h>=.6?'有点饿':h>=.3?'半饱':'吃饱�
 const hungerTint=h=>h>=.75?'#b5573c':h>=.45?'#c2884a':'#7f9570';
 function renderRanking(tab=rankingTab){
   rankingTab=tab;const eaten=tab==='eaten';
-  $('#panel-title').textContent=eaten?'锦鲤食量榜':'锦鲤饥饿榜';
-  $('#panel-eyebrow').textContent=eaten?'A LITTLE APPETITE, A LOT OF JOY':'WHO IS HUNGRY RIGHT NOW';
   const total=simulation.fish.reduce((n,f)=>n+f.eaten,0),hungry=simulation.fish.filter(f=>f.hunger>=.55).length;
   const head=eaten?`每一粒鱼食都有归属，每一尾锦鲤都值得偏爱。<br>小伙伴们一共吃掉了 <strong>${total}</strong> 粒鱼食 · 数据保存在此设备`
     :`饥饿感随时间慢慢涨上来，喂一粒就消一点。<br>眼下有 <strong>${hungry}</strong> 尾锦鲤在等饭吃 · 越饿游得越慢，也越急着抢食`;
@@ -286,7 +370,7 @@ function renderWeather(){
     + `<div class="sub-block${settings.clockOn ? '' : ' is-off'}" id="clock-style-sub">`
     + `<div class="clock-styles" role="group" aria-label="卡片样式">${CLOCK_STYLES.map(([v, n]) => `<button type="button" class="clock-style${settings.clockStyle === v ? ' selected' : ''}" data-clock-style="${v}" aria-pressed="${settings.clockStyle === v}"><span class="cs-preview" data-clock-style="${v}"><b>12:08</b><i></i></span><span>${n}</span></button>`).join('')}</div></div>`;
 
-  prefsHost().innerHTML = `<p class="description">晴日看波光，雨天听水声。让池塘拥有此刻的心情。</p>`
+  $('#panel-content').innerHTML = `<p class="description">晴日看波光，雨天听水声。让池塘拥有此刻的心情。</p>`
     + `<div class="weather-options">${weathers.map(([v, n, i]) => `<button class="weather-option ${settings.weather === v ? 'selected' : ''}" data-weather="${v}" aria-pressed="${settings.weather === v}">${icon(i)}<span>${n}</span></button>`).join('')}</div>`
     + precip
     + foldGroup('clockcard', '时间与天气卡片', clockBody, true, `<span class="fold-note" id="clock-style-note">${settings.clockOn ? clockStyleName(settings.clockStyle) : '已隐藏'}</span>`)
@@ -360,21 +444,11 @@ function renderSettings(){
     + `<div class="setting-row sub"><div>下句<small>最多 7 字</small></div><input data-verse="verseB" type="text" maxlength="7" value="${settings.verseB}" aria-label="下句"/></div>`
     + `<div class="setting-row sub"><div>印章<small>最多 4 字，逐字竖排</small></div><input data-verse="seal" type="text" maxlength="4" value="${settings.seal}" aria-label="印章"/></div>`
     + `</div>`;
-  const waterOptions = [['stream', '溪流潺潺'], ['spring', '山泉叮咚'], ['cascade', '叠水瀑声'], ['lapping', '池水轻漾'], ['bamboo', '竹筒惊鹿'], ['off', '关闭']];
-  const musicOptions = [['guqin', '古琴'], ['bowl', '颂钵'], ['chimes', '风铃'], ['off', '关闭']];
-  // 总音量是这一组的主项，其余几路声音都挂在它下面。
-  const soundBody = `<div class="setting-row"><div>总音量<small>底栏喇叭可随时开关全部声音</small></div><input id="volume" type="range" aria-label="总音量" min="0" max="1" step="0.05" value="${settings.volume}"/></div>`
-    + `<div class="setting-row sub"><div>水声<small>池畔流水，独立于天气</small></div><div class="sound-ctl"><input data-vol="waterVol" type="range" aria-label="水声音量" min="0" max="1" step="0.05" value="${settings.waterVol}"/><select id="water-type" aria-label="水声">${waterOptions.map(([v, n]) => `<option value="${v}" ${(settings.water ? settings.waterType : 'off') === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div></div>`
-    + `<div class="setting-row sub"><div>天气环境音<small>晴有鸟鸣、阴闻布谷、雨落池塘、雪有寒鸦、夏夜虫蛙</small></div><div class="sound-ctl"><input data-vol="weatherVol" type="range" aria-label="天气环境音音量" min="0" max="1" step="0.05" value="${settings.weatherVol}"/><input data-sound="weatherSound" type="checkbox" aria-label="天气环境音" ${settings.weatherSound ? 'checked' : ''}/></div></div>`
-    + `<div class="setting-row sub"><div>禅意音乐<small>稀疏几声，不扰清静</small></div><div class="sound-ctl"><input data-vol="musicVol" type="range" aria-label="禅意音乐音量" min="0" max="1" step="0.05" value="${settings.musicVol}"/><select id="music" aria-label="禅意音乐">${musicOptions.map(([v, n]) => `<option value="${v}" ${settings.music === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div></div>`
-    + `<div class="setting-row sub"><div>互动水声<small>投喂、吞食与轻点水面的声音</small></div><input data-sound="sfx" type="checkbox" aria-label="互动水声" ${settings.sfx ? 'checked' : ''}/></div>`;
-
-  prefsHost().innerHTML = `<p class="description">把这方小天地，调成你喜欢的模样。</p>`
+  $('#panel-content').innerHTML = `<p class="description">把这方小天地，调成你喜欢的模样。</p>`
     + `<div class="setting-row"><div>游动速度<small>慢一点，也是一种生活</small></div><input id="swim-speed" type="range" aria-label="游动速度" min="0.3" max="2" step="0.1" value="${settings.speed}"/></div>`
     + foldGroup('residents', '池塘住客', residents.map(([k, n, d]) => toggleRow(k, n, d)).join(''), true)
     + `<div class="setting-row"><div>画面品质<small>节能模式限制至 30 帧</small></div><select id="quality" aria-label="画面品质"><option value="high" ${settings.quality === 'high' ? 'selected' : ''}>细腻 · 60 帧</option><option value="eco" ${settings.quality === 'eco' ? 'selected' : ''}>节能 · 30 帧</option></select></div>`
     + foldGroup('verse', '诗句', verseBody, true)
-    + foldGroup('sound', '声音', soundBody, false)
     + (window.PondHost ? `<div class="setting-row"><div>手机动态壁纸<small id="wallpaper-note">${PondHost.isWallpaperActive() ? '池塘已在桌面上 · 轻点桌面空白处投喂' : '把池塘设为手机桌面背景'}${PondHost.wallpaperStatus?.() ? `<br>壁纸状态：${PondHost.wallpaperStatus().replace(/[<>&]/g, '')}` : ''}</small></div><button id="set-wallpaper" class="secondary">设为壁纸</button></div>` : '')
     + `<div class="form-actions"><span class="small-note">锦鲤和投喂记录会自动保存在此设备</span><button id="fullscreen" class="secondary">全屏观鱼</button></div>`
     + `<div class="dialog-footer">空格：在池塘中央投喂（先点水面）<br>H：隐藏 / 显示界面 · Esc：退出面板或沉浸模式<br>根据「碧潭观鱼」视频独立复刻，非原作者官方作品。</div>`;
@@ -394,13 +468,25 @@ function renderSettings(){
     persist();
   }));
   $('#quality').addEventListener('change', e => { settings.quality = e.target.value; resize(); persist(); });
+  $('#fullscreen').addEventListener('click', async () => { dialog.close(); setZen(true); try { await document.documentElement.requestFullscreen(); } catch { toast('已进入沉浸模式，此浏览器暂不支持全屏'); } });
+}
+// 声音单独一栏：总音量是主项，其余几路声音都挂在它下面。
+function renderSound(){
+  const waterOptions = [['stream', '溪流潺潺'], ['spring', '山泉叮咚'], ['cascade', '叠水瀑声'], ['lapping', '池水轻漾'], ['bamboo', '竹筒惊鹿'], ['off', '关闭']];
+  const musicOptions = [['guqin', '古琴'], ['bowl', '颂钵'], ['chimes', '风铃'], ['off', '关闭']];
+  $('#panel-content').innerHTML = `<p class="description">全部声音都由 Web Audio 实时合成，默认静音。底栏喇叭可随时开关。</p>`
+    + `<div class="setting-row"><div>总音量<small>底栏喇叭可随时开关全部声音</small></div><input id="volume" type="range" aria-label="总音量" min="0" max="1" step="0.05" value="${settings.volume}"/></div>`
+    + `<div class="setting-row sub"><div>水声<small>池畔流水，独立于天气</small></div><div class="sound-ctl"><input data-vol="waterVol" type="range" aria-label="水声音量" min="0" max="1" step="0.05" value="${settings.waterVol}"/><select id="water-type" aria-label="水声">${waterOptions.map(([v, n]) => `<option value="${v}" ${(settings.water ? settings.waterType : 'off') === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div></div>`
+    + `<div class="setting-row sub"><div>天气环境音<small>晴有鸟鸣、阴闻布谷、雨落池塘、雪有寒鸦、夏夜虫蛙</small></div><div class="sound-ctl"><input data-vol="weatherVol" type="range" aria-label="天气环境音音量" min="0" max="1" step="0.05" value="${settings.weatherVol}"/><input data-sound="weatherSound" type="checkbox" aria-label="天气环境音" ${settings.weatherSound ? 'checked' : ''}/></div></div>`
+    + `<div class="setting-row sub"><div>禅意音乐<small>稀疏几声，不扰清静</small></div><div class="sound-ctl"><input data-vol="musicVol" type="range" aria-label="禅意音乐音量" min="0" max="1" step="0.05" value="${settings.musicVol}"/><select id="music" aria-label="禅意音乐">${musicOptions.map(([v, n]) => `<option value="${v}" ${settings.music === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div></div>`
+    + `<div class="setting-row sub"><div>互动水声<small>投喂、吞食与轻点水面的声音</small></div><input data-sound="sfx" type="checkbox" aria-label="互动水声" ${settings.sfx ? 'checked' : ''}/></div>`
+    + `<div class="dialog-footer">改音量时底栏喇叭若还没打开，点一下即可试听。</div>`;
   const hint = () => { if (!sound.active) toast('点击底栏喇叭即可试听'); };
   $('#water-type').addEventListener('change', e => { settings.water = e.target.value !== 'off'; if (settings.water) settings.waterType = e.target.value; sound.configure(settings); persist(); hint(); });
   $('#music').addEventListener('change', e => { settings.music = e.target.value; sound.configure(settings); persist(); hint(); });
   document.querySelectorAll('[data-sound]').forEach(input => input.addEventListener('change', () => { settings[input.dataset.sound] = input.checked; sound.configure(settings); persist(); hint(); }));
   document.querySelectorAll('[data-vol]').forEach(input => input.addEventListener('input', () => { settings[input.dataset.vol] = Number(input.value); sound.configure(settings); scheduleSave(); }));
   $('#volume').addEventListener('input', e => { settings.volume = Number(e.target.value); sound.configure(settings); scheduleSave(); });
-  $('#fullscreen').addEventListener('click', async () => { dialog.close(); setZen(true); try { await document.documentElement.requestFullscreen(); } catch { toast('已进入沉浸模式，此浏览器暂不支持全屏'); } });
 }
 
 function setZen(value){zen=value;document.body.classList.toggle('zen',zen);document.querySelectorAll('.ui').forEach(el=>el.inert=zen);$('#exit-zen').hidden=!zen;$('#zen-button').setAttribute('aria-label',zen?'退出沉浸模式':'进入沉浸模式');}
