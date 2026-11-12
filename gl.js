@@ -196,11 +196,15 @@ vec3 grade(vec3 c, vec2 screenPx, vec2 view){
   c *= uBrightness;
   c = max(c, 0.);
   if (uMoonlight > 0.) {
-    // Cool moonlight over the whole pond, strongest toward the viewer and fading with distance.
+    // Cool moonlight over the whole pond, strongest toward the viewer and fading with distance. It is a wallpaper
+    // first: the point is to see the koi, so the lift is generous and rolls off softly rather than clipping.
     vec2 d = (screenPx - uMoonPos) / (min(view.x, view.y) * .92);
     float k = exp(-dot(d, d) * 1.35) * uMoonlight;
-    c *= 1. + 1.1 * k;
-    c += vec3(.40, .52, .78) * .10 * k;
+    c *= 1. + 2.3 * k;
+    c += vec3(.40, .52, .78) * .14 * k;
+    // A floor of cool light, so a rainy night is still legible rather than a dark smear.
+    c += vec3(.055, .068, .095) * k;
+    c = c / (1. + max(vec3(0.), c - 1.) * .85);
   }
   return c;
 }`;
@@ -248,9 +252,9 @@ void main(){
     float facet = clamp(.80 + dot(-g, toMoon) * 4.2, .18, 1.45);
     float disc = (1. - smoothstep(.93, 1.03, r)) * mix(.05, 1., lit) * face * (1. - .18 * r * r) * facet;
     // Both the disc and the soft halo around it answer the moonlight slider, and the reflection switch turns them off
-    // while leaving the rest of the night alone.
+    // while leaving the rest of the night alone. Clouds only veil the moon, they do not put it out.
     float halo = exp(-r * r / 6.) * .2 + exp(-r / 3.5) * .08;
-    night += (vec3(.95, .94, .88) * disc * 1.7 + vec3(.6, .72, 1.) * halo * (.3 + .7 * illum)) * uMoonReflect * uMoonlight;
+    night += (vec3(.95, .94, .88) * disc * 2.2 + vec3(.6, .72, 1.) * halo * (.3 + .7 * illum)) * uMoonReflect * uMoonlight * (1. - cloud * .15);
     // Moonlight glitter gathers round the reflection; a few faint stars twinkle between the waves.
     glint *= (.3 + exp(-length((px - uMoonDisc.xy) / uMoonDisc.z) / 5.) * 1.3) * (.3 + .7 * illum);
     vec2 cell = floor(rp / 38.), f = fract(rp / 38.) - .5, sp = vec2(hash(cell + 3.1), hash(cell + 7.7)) - .5;
@@ -259,7 +263,7 @@ void main(){
     // Moonlight on the moving water: every wave facet turned toward the moon's reflection catches its light.
     float reach = exp(-length(px - uMoonDisc.xy) / (uMoonDisc.z * 16.));
     night += vec3(.55, .66, .9) * (max(0., dot(-g, toMoon)) * .6 + length(g) * .14) * (.35 + .65 * reach) * (.4 + .6 * illum);
-    night = (night + glint) * uMoon * (1. - cloud * .9);
+    night = (night + glint) * uMoon * (1. - cloud * .7);
     glint = vec3(0.);
   }
   col += glint;

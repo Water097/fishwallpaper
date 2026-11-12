@@ -256,24 +256,22 @@ function renderWeather(){
   const gradeRows = (pre, label) => [['Contrast', '对比度', .7, 1.4], ['Bright', '亮度', .6, 1.6], ['Hue', '色调', -40, 40]]
     .map(([f, n, lo, hi]) => `<div class="grade-row"><span>${n}</span><input data-grade="${pre}${f}" type="range" aria-label="${label}${n}" min="${lo}" max="${hi}" step="any" value="${settings[pre + f]}"/></div>`).join('');
   const resetBtn = pre => `<button class="grade-reset-btn" type="button" data-grade-reset="${pre}" aria-label="恢复默认" title="恢复默认">${icon('reset')}</button>`;
-  // 城市天气：先搜索并选定城市，跟随城市天气这个开关才会出现在它下面。
+  // 白天与夜晚是「调色」的下级，但不再各自折叠——展开调色就一路调完，只有调色这一层需要下拉。
+  const gradeBlock = (pre, label) => `<div class="grade-head"><span>${label}</span>${resetBtn(pre)}</div>${gradeRows(pre, label)}`;
+  // 天气：先查城市，「跟随城市天气」才在输入框下面出现；已选城市的实时天气显示在这一组标题的右边。
   const cityBody = `<form id="city-form" class="form-row"><input id="city-input" aria-label="城市名称" type="text" maxlength="80" placeholder="输入城市，如北京、杭州、Shanghai" required/><button class="secondary" type="submit">查询</button></form>`
     + `<div id="city-results" class="city-results" aria-live="polite"></div>`
-    + `<div class="weather-info" id="weather-info"></div>`
     + (settings.location
       ? `<div class="setting-row sub"><div>跟随城市天气<small>每 15 分钟同步晴、雨、雪</small></div><input id="auto-weather" type="checkbox" aria-label="跟随城市天气" ${settings.autoWeather ? 'checked' : ''}/></div>`
-      : `<div class="setting-row sub is-off"><div>跟随城市天气<small>先查询并选择一个城市</small></div></div>`)
+      : '')
     + `<p class="dialog-footer">城市查询仅发送城市名称，天气查询使用所选城市坐标。<br>天气数据由 <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> 提供，无需 API 密钥。</p>`;
 
   prefsHost().innerHTML = `<p class="description">晴日看波光，雨天听水声。让池塘拥有此刻的心情。</p>`
     + `<div class="weather-options">${weathers.map(([v, n, i]) => `<button class="weather-option ${settings.weather === v ? 'selected' : ''}" data-weather="${v}" aria-pressed="${settings.weather === v}">${icon(i)}<span>${n}</span></button>`).join('')}</div>`
     + precip
-    + `<div class="setting-row"><div>月下观鱼<small>夜色里，池中倒映今夜的月亮</small></div><input id="night" type="checkbox" aria-label="月下观鱼" ${settings.night ? 'checked' : ''}/></div>`
-    + moonSub
-    + `<h3>调色</h3>`
-    + foldGroup('grade-day', '白天', gradeRows('day', '白天'), false, resetBtn('day'))
-    + foldGroup('grade-night', '夜晚', gradeRows('night', '夜晚'), false, resetBtn('night'))
-    + foldGroup('city', '城市天气', cityBody, false);
+    + foldGroup('night', '月下观鱼', `<div class="setting-row"><div>夜色里，池中倒映今夜的月亮</div><input id="night" type="checkbox" aria-label="月下观鱼" ${settings.night ? 'checked' : ''}/></div>` + moonSub, true)
+    + foldGroup('grade', '调色', gradeBlock('day', '白天') + gradeBlock('night', '夜晚'), true)
+    + foldGroup('city', '天气', cityBody, false, `<span class="fold-note" id="weather-info"></span>`);
 
   updateWeatherInfo();
   document.querySelectorAll('[data-weather]').forEach(b => b.addEventListener('click', () => { settings.weather = b.dataset.weather; settings.autoWeather = false; weatherRequest++; persist(); applyWeather(); renderWeather(); }));
@@ -309,8 +307,14 @@ function renderWeather(){
   $('#city-form').addEventListener('submit', searchCity);
 }
 
-
-function updateWeatherInfo(){const box=$('#weather-info');if(!box)return;if(settings.location&&weatherData){box.textContent=`${settings.location.name} · ${Math.round(weatherData.temperature_2m)}°C · 风速 ${weatherData.wind_speed_10m} km/h · ${settings.autoWeather?'正在联动池塘':'未开启天气联动'}`;}else if(settings.location){box.textContent=`已选择 ${settings.location.name} · ${settings.autoWeather?'正在获取实时天气…':'天气联动未开启'}`;}else box.textContent='当前为手动天气。查询城市后，选择搜索结果即可开启实时联动。';}
+// 天气这一组标题右边的一行小字：选中的城市和它此刻的气温，够用就好，细节留给下方的联动状态。
+function updateWeatherInfo(){
+  const box = $('#weather-info'); if (!box) return;
+  if (!settings.location) { box.textContent = '未选城市'; return; }
+  const name = settings.location.name;
+  const temp = weatherData ? ` ${Math.round(weatherData.temperature_2m)}°C` : '';
+  box.textContent = settings.autoWeather ? `${name}${temp} · 联动` : `${name}${temp} · 未联动`;
+}
 async function searchCity(e){e.preventDefault();const query=$('#city-input').value.trim();if(!query)return;const results=$('#city-results'),button=$('#city-form button');citySearchController?.abort();const controller=new AbortController();citySearchController=controller;const timeout=setTimeout(()=>controller.abort(),12000);button.disabled=true;button.textContent='查询中';results.textContent='正在寻找城市…';try{const response=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=zh&format=json`,{signal:controller.signal});if(!response.ok)throw Error('network');const data=await response.json();if(!results.isConnected)return;results.replaceChildren();if(!data.results?.length){results.textContent='没有找到这个城市，试试城市拼音或英文名称。';return;}for(const place of data.results){const b=document.createElement('button');b.className='city-result';b.textContent=`${place.name} · ${place.admin1||''} ${place.country||''}`;b.addEventListener('click',()=>{settings.location={name:place.name,latitude:place.latitude,longitude:place.longitude};settings.autoWeather=true;weatherData=null;persist();applyWeather();renderWeather();fetchWeather();});results.append(b);}}catch{if(results.isConnected)results.textContent='城市查询失败，请检查网络后重试。仍可使用上方的手动天气。';}finally{clearTimeout(timeout);if(button.isConnected){button.disabled=false;button.textContent='查询';}}}
 async function fetchWeather(){if(!settings.autoWeather||!settings.location)return;const request=++weatherRequest,location={...settings.location};try{const response=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${location.latitude}&longitude=${location.longitude}&current=temperature_2m,weather_code,wind_speed_10m,precipitation,snowfall&timezone=auto`,{signal:AbortSignal.timeout(12000)});if(!response.ok)throw Error('network');const data=await response.json();if(request!==weatherRequest||!settings.autoWeather)return;if(!Number.isFinite(data.current?.temperature_2m)||!Number.isFinite(data.current?.weather_code))throw Error('data');weatherData=data.current;settings.weather=weatherFromCode(weatherData.weather_code);if(settings.weather==='rain'&&Number.isFinite(weatherData.precipitation))settings.rainAmount=clamp(.15+weatherData.precipitation/8,.15,1);if(settings.weather==='snow'&&Number.isFinite(weatherData.snowfall))settings.snowAmount=clamp(.2+weatherData.snowfall/1.5,.2,1);applyWeather();persist();if(activePanel==='weather')renderWeather();}catch{if(request!==weatherRequest)return;$('#weather-note').textContent='天气同步失败 · 保留当前天气';if(activePanel==='weather'&&$('#weather-info'))$('#weather-info').textContent='天气服务暂时无法连接，已保留当前池塘天气，可稍后重试。';toast('实时天气暂不可用，已保留当前天气');}}
 setInterval(fetchWeather,15*60*1000);if(settings.autoWeather)fetchWeather();

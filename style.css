@@ -33,6 +33,11 @@ body:not(.gl) .moon{opacity:calc(var(--moon,0) * .9)}
 .fold.open .fold-body{display:block}
 /* 下级设置被关掉时整块收起，而不是留一堆点不动的灰行 */
 .sub-block.is-off,.setting-row.sub.is-off{display:none}
+/* 分组标题右边的一行小字（例如已选城市此刻的气温） */
+.fold-note{margin-left:8px;font-size:10px;letter-spacing:.4px;color:#8b947f;white-space:nowrap}
+/* 调色里的白天 / 夜晚：只是小标题，不折叠 */
+.grade-head{display:flex;align-items:center;gap:8px;margin:16px 0 2px;font-size:12px;font-weight:500;letter-spacing:2px;color:#4d6a58}
+.grade-head:first-child{margin-top:4px}
 .grade-reset-btn{display:grid;place-items:center;width:23px;height:23px;padding:0;border:1px solid #cbd4c0;border-radius:50%;background:#fffef6;color:#7d8a72;transition:background .2s,color .2s,border-color .2s}
 .grade-reset-btn:hover{background:#eef2e6;color:#3f5c4a;border-color:#9fb098}
 .grade-reset-btn svg{width:13px;height:13px}
