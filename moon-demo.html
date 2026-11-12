@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>月光倒影 · 方案预览</title>
+<style>
+  :root { --ink:#dfe7f2; --dim:#8fa0b6; --line:#2b3a4d; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:22px 24px 40px; background:#0b1119; color:var(--ink);
+         font:14px/1.6 "PingFang SC","Microsoft YaHei",system-ui,sans-serif; }
+  h1 { font-size:16px; font-weight:500; margin:0 0 4px; letter-spacing:1px; }
+  p.lead { color:var(--dim); font-size:12px; margin:0 0 16px; }
+  .bar { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:0 0 18px; padding:10px 14px;
+         border:1px solid var(--line); border-radius:10px; background:#101a26; }
+  .bar label { font-size:12px; color:var(--dim); }
+  input[type=range] { width:260px; accent-color:#8fb4ff; }
+  button { padding:6px 12px; border:1px solid var(--line); border-radius:7px; background:#16222f; color:var(--ink);
+           font-size:12px; cursor:pointer; }
+  button:hover { background:#1d2c3d; }
+  #clockTxt { font-variant-numeric:tabular-nums; color:#cfe0ff; font-size:13px; min-width:64px; }
+  .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; max-width:1180px; }
+  .card { border:1px solid var(--line); border-radius:12px; overflow:hidden; background:#101a26; }
+  .card canvas { display:block; width:100%; height:auto; }
+  .cap { display:flex; align-items:baseline; gap:10px; padding:10px 13px; border-top:1px solid var(--line); }
+  .tag { font:500 13px/1 ui-monospace,monospace; color:#9dc0ff; letter-spacing:1px; }
+  .cap b { font-weight:500; }
+  .cap small { color:var(--dim); font-size:11px; }
+</style>
+</head>
+<body>
+<h1>月光倒影 · 四种方案</h1>
+<p class="lead">同一个月亮，四种在水面上的画法。拖动时间看它从左往右走，选一个（记住字母），我按那个改进实机。</p>
+
+<div class="bar">
+  <label for="t">时间</label>
+  <input id="t" type="range" min="18" max="30" step="0.05" value="21.5">
+  <span id="clockTxt">21:30</span>
+  <button id="now">现在</button>
+  <button id="play">暂停走动</button>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <canvas id="cA" width="560" height="330"></canvas>
+    <div class="cap"><span class="tag">A</span><b>切片荡漾</b><small>月盘切成横条，每一条随波纹左右错开、明暗起伏</small></div>
+  </div>
+  <div class="card">
+    <canvas id="cB" width="560" height="330"></canvas>
+    <div class="cap"><span class="tag">B</span><b>碎成光带</b><small>只留亮的那几条，月亮被水搅碎成断续横带</small></div>
+  </div>
+  <div class="card">
+    <canvas id="cC" width="560" height="330"></canvas>
+    <div class="cap"><span class="tag">C</span><b>柔光晕</b><small>不切开，圆盘外裹一层竖向柔光，安静、朦胧</small></div>
+  </div>
+  <div class="card">
+    <canvas id="cD" width="560" height="330"></canvas>
+    <div class="cap"><span class="tag">D</span><b>碎钻月光</b><small>几乎没有月盘，只剩一片闪烁的亮点</small></div>
+  </div>
+</div>
+
+<script>
+const pond = new Image(); pond.src = 'assets/pond.jpg';
+const T = { hour: 21.5, playing: true, t: 0 };
+const $ = (s) => document.querySelector(s);
+
+// 月亮在天空中的位置：18:00 从左边缘升起，24:00 最高，06:00 落到右边缘。
+function moonSpot(hour) {
+  const k = (hour - 18) / 12;                 // 0 → 1
+  const x = 0.08 + k * 0.84;                  // 横向：左到右
+  const y = 0.34 - Math.sin(k * Math.PI) * 0.14; // 纵向：午夜最高，仍留在画面偏上
+  return { x, y, k };
+}
+
+// 把月盘画进一块离屏画布，四种画法都从这块抠。
+const disc = document.createElement('canvas');
+function makeDisc(R) {
+  const s = R * 2 + 8;
+  disc.width = disc.height = s;
+  const g = disc.getContext('2d');
+  const cx = s / 2, cy = s / 2;
+  const grad = g.createRadialGradient(cx, cy, R * 0.55, cx, cy, R);
+  grad.addColorStop(0, 'rgba(238,244,255,1)');
+  grad.addColorStop(0.86, 'rgba(226,236,255,.95)');
+  grad.addColorStop(1, 'rgba(200,220,255,0)');
+  g.fillStyle = grad;
+  g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill();
+  // 一点月海的暗斑，免得看着像纯白圆片
+  g.globalCompositeOperation = 'source-atop';
+  g.fillStyle = 'rgba(150,170,205,.30)';
+  for (const [dx, dy, r] of [[-.3, .22, .26], [.2, .3, .18], [.3, -.12, .16], [-.36, -.16, .2]]) {
+    g.beginPath(); g.arc(cx + dx * R, cy + dy * R, r * R, 0, Math.PI * 2); g.fill();
+  }
+  g.globalCompositeOperation = 'source-over';
+  return disc;
+}
+
+function nightBase(ctx, W, H) {
+  ctx.fillStyle = '#060a12'; ctx.fillRect(0, 0, W, H);
+  if (pond.complete && pond.naturalWidth) {
+    const k = Math.max(W / pond.naturalWidth, H / pond.naturalHeight);
+    const w = pond.naturalWidth * k, h = pond.naturalHeight * k;
+    ctx.drawImage(pond, (W - w) / 2, (H - h) / 2, w, h);
+  }
+  // 夜色：压暗 + 偏冷蓝
+  ctx.fillStyle = 'rgba(9,18,36,.72)'; ctx.fillRect(0, 0, W, H);
+  const vg = ctx.createRadialGradient(W / 2, H * .45, H * .2, W / 2, H * .5, W * .78);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.55)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+}
+
+// 水面横向波纹值：给切片错位和明暗用
+const wave = (y, t, f = 0.075) => Math.sin(y * f + t * 1.6) * .6 + Math.sin(y * f * 2.3 - t * 1.1) * .4;
+
+function drawReflection(ctx, W, H, R, style, t) {
+  const { x, y } = moonSpot(T.hour);
+  const cx = x * W, cy = y * H;
+  makeDisc(R);
+  const s = disc.width, top = cy - R;
+
+  // 把月盘按“屏幕行”切片贴上去：srcY 换成离屏画布里的对应行，ox 是这一行的横向错位。
+  const slice = (rowScreen, h, ox, alpha) => {
+    const srcY = rowScreen - top + 4;
+    if (srcY < 0 || srcY + h > s) return;
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(disc, 0, srcY, s, h, cx - s / 2 + ox, rowScreen, s, h);
+  };
+
+  if (style === 'A') {
+    for (let row = Math.ceil(top); row < top + R * 2; row += 2) {
+      const w = wave(row, t);
+      slice(row, 2, w * 3.6, .5 + .5 * (0.5 + 0.5 * w));
+    }
+    ctx.globalAlpha = 1;
+  } else if (style === 'B') {
+    for (let row = Math.ceil(top - R * .1); row < top + R * 2.2; row += 3) {
+      const w = wave(row, t, .05);
+      const gap = Math.sin(row * .13 + t * 1.9 + Math.sin(row * .05) * 1.2);
+      if (gap < -.25) continue;
+      slice(row, 3, w * 8, Math.max(.28, .35 + .75 * (0.5 + 0.5 * w)));
+    }
+    ctx.globalAlpha = 1;
+  } else if (style === 'C') {
+    const g = ctx.createRadialGradient(cx, cy, R * .2, cx, cy, R * 2.8);
+    g.addColorStop(0, 'rgba(214,230,255,.5)');
+    g.addColorStop(.42, 'rgba(168,199,255,.15)');
+    g.addColorStop(1, 'rgba(140,180,255,0)');
+    ctx.save(); ctx.translate(cx, cy); ctx.scale(.78, 1.45); ctx.translate(-cx, -cy);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R * 2.8, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    ctx.globalAlpha = .92; ctx.drawImage(disc, cx - s / 2, cy - s / 2); ctx.globalAlpha = 1;
+  } else {
+    ctx.globalAlpha = .16; ctx.drawImage(disc, cx - s / 2, cy - s / 2); ctx.globalAlpha = 1;
+    // 水面被压扁：点在横向拉长、纵向压扁的椭圆里随机散开，各自闪烁
+    for (let i = 0; i < 110; i++) {
+      const a = (i * 12.9898 + 4.1) % 6.283, rr = Math.sqrt(((i * 37.719) % 1));
+      const px = cx + Math.cos(a) * rr * R * 1.75;
+      const py = cy + Math.sin(a) * rr * R * .62;
+      const tw = .5 + .5 * Math.sin(t * 3.4 + i * 2.1);
+      const sz = 1.6 + (((i * 53.7) % 1) * 2.2);
+      ctx.fillStyle = `rgba(228,240,255,${(.10 + .62 * tw).toFixed(3)})`;
+      ctx.fillRect(px, py, sz, sz * .8);
+    }
+  }
+}
+
+const views = [
+  ['cA', 'A'], ['cB', 'B'], ['cC', 'C'], ['cD', 'D'],
+].map(([id, style]) => ({ ctx: document.getElementById(id).getContext('2d'), style, W: 560, H: 330 }));
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(.05, (now - last) / 1000); last = now;
+  if (T.playing) { T.t += dt; T.hour += dt * .25; if (T.hour > 30) T.hour = 18; syncTime(); }
+  for (const v of views) {
+    nightBase(v.ctx, v.W, v.H);
+    drawReflection(v.ctx, v.W, v.H, 30, v.style, T.t);
+  }
+  requestAnimationFrame(frame);
+}
+
+function syncTime() {
+  const h = T.hour % 24;
+  const hh = Math.floor(h), mm = Math.floor((h - hh) * 60);
+  $('#clockTxt').textContent = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  $('#t').value = T.hour;
+}
+
+$('#t').addEventListener('input', (e) => { T.hour = Number(e.target.value); T.playing = false; $('#play').textContent = '继续走动'; syncTime(); });
+$('#play').addEventListener('click', () => { T.playing = !T.playing; $('#play').textContent = T.playing ? '暂停走动' : '继续走动'; });
+$('#now').addEventListener('click', () => {
+  const d = new Date(), h = d.getHours() + d.getMinutes() / 60;
+  T.hour = h < 12 ? h + 24 : h; T.playing = false; $('#play').textContent = '继续走动'; syncTime();
+});
+
+pond.onload = () => { syncTime(); requestAnimationFrame(frame); };
+if (pond.complete) { syncTime(); requestAnimationFrame(frame); }
+</script>
+</body>
+</html>

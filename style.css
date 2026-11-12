@@ -20,12 +20,20 @@
 body:not(.gl) .moon{opacity:calc(var(--moon,0) * .9)}
 
 /* Day and night each carry their own grade; these rows are compact because there are six of them. */
-.grade-head{margin:14px 0 2px;font-size:10px;letter-spacing:2px;color:#8b947f}
-.grade-note{margin:0 0 4px}
+/* 白天 / 夜晚两个分组标题：比正文稍大、加粗，右侧带一个圆形恢复按钮 */
+.grade-head{display:flex;align-items:center;gap:8px;margin:18px 0 6px;font-size:14px;font-weight:500;letter-spacing:1.5px;color:#2f4a3a}
+.grade-reset-btn{display:grid;place-items:center;width:23px;height:23px;padding:0;border:1px solid #cbd4c0;border-radius:50%;background:#fffef6;color:#7d8a72;transition:background .2s,color .2s,border-color .2s}
+.grade-reset-btn:hover{background:#eef2e6;color:#3f5c4a;border-color:#9fb098}
+.grade-reset-btn svg{width:13px;height:13px}
 .grade-row{display:flex;align-items:center;gap:12px;padding:5px 0;font-size:11px;color:#4d5f45}
 .grade-row span{flex:0 0 44px}
 .grade-row input{flex:1;min-width:0}
-.grade-reset{margin:14px 0 4px}
+/* 下级设置：左侧缩进 + 一小段引导线，一眼看出它挂在上面那项下面 */
+.setting-row.sub{padding-left:20px;position:relative;font-size:11px}
+.setting-row.sub::before{content:'';position:absolute;left:7px;top:50%;width:9px;height:1px;background:#c7d1be}
+.setting-row.sub small{font-size:9px}
+.setting-row.sub.off{opacity:.42}
+.setting-row input[type=text]{max-width:150px;text-align:right}
 
 /* The pond must stay readable while you tune it: the dialog sits on a light veil, no blur, so every slider shows
    its effect live. */

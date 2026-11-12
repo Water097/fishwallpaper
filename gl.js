@@ -199,8 +199,8 @@ vec3 grade(vec3 c, vec2 screenPx, vec2 view){
     // Cool moonlight over the whole pond, strongest toward the viewer and fading with distance.
     vec2 d = (screenPx - uMoonPos) / (min(view.x, view.y) * .92);
     float k = exp(-dot(d, d) * 1.35) * uMoonlight;
-    c *= 1. + .55 * k;
-    c += vec3(.40, .52, .78) * .05 * k;
+    c *= 1. + 1.1 * k;
+    c += vec3(.40, .52, .78) * .10 * k;
   }
   return c;
 }`;
