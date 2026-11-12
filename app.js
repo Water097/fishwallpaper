@@ -20,11 +20,15 @@ const ICONS={
 const icon=n=>`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[n]||ICONS.sun}"/></svg>`;
 function icons(root=document){root.querySelectorAll('[data-icon]').forEach(e=>e.innerHTML=icon(e.dataset.icon));}
 icons();
+// 右上角「时间与天气」卡片的几种版式。样式名与 CSS 里的 data-clock-style 一一对应。
+const CLOCK_STYLES=[['paper','纸笺'],['glass','琉璃'],['ink','墨韵'],['plain','素影'],['strip','横幅']];
+const clockStyleName=k=>(CLOCK_STYLES.find(s=>s[0]===k)||CLOCK_STYLES[0])[1];
 let saved=null;try{saved=sanitizeSave(JSON.parse(localStorage.getItem('bichi-pond-v1')??localStorage.getItem('xitan-pond-v1')??localStorage.getItem('bitan-pond-v1')));}catch{}
-const defaults={weather:'sunny',speed:1,turtles:true,crabs:true,silverCarp:true,butterflies:true,names:false,quality:'high',autoWeather:false,location:null,night:false,water:true,waterType:'stream',waterVol:.6,weatherSound:true,weatherVol:.6,music:'guqin',musicVol:.5,sfx:true,volume:.7,rainAmount:.5,snowAmount:.5,soundOn:false,moonlight:.55,moonReflect:true,verseOn:true,verseA:'水清鱼读月',verseB:'花静鸟谈天',seal:'闲观',dayContrast:1,dayBright:1,dayHue:0,nightContrast:1,nightBright:1,nightHue:0};
+const defaults={weather:'sunny',speed:1,turtles:true,crabs:true,silverCarp:true,butterflies:true,names:false,quality:'high',autoWeather:false,location:null,night:false,water:true,waterType:'stream',waterVol:.6,weatherSound:true,weatherVol:.6,music:'guqin',musicVol:.5,sfx:true,volume:.7,rainAmount:.5,snowAmount:.5,soundOn:false,moonlight:.55,moonReflect:true,verseOn:true,verseA:'水清鱼读月',verseB:'花静鸟谈天',seal:'闲观',dayContrast:1,dayBright:1,dayHue:0,nightContrast:1,nightBright:1,nightHue:0,clockOn:true,clockStyle:'paper'};
 const settings={...defaults};
 // Copy valid values from a stored settings object (this page's save, or one written by another window).
-function readSettings(src){for(const key of ['turtles','crabs','silverCarp','butterflies','names','autoWeather','night','sfx','water','weatherSound','soundOn','verseOn','moonReflect'])if(typeof src[key]==='boolean')settings[key]=src[key];
+function readSettings(src){for(const key of ['turtles','crabs','silverCarp','butterflies','names','autoWeather','night','sfx','water','weatherSound','soundOn','verseOn','moonReflect','clockOn'])if(typeof src[key]==='boolean')settings[key]=src[key];
+  if(CLOCK_STYLES.some(([v])=>v===src.clockStyle))settings.clockStyle=src.clockStyle;
   if(PondAudio.MUSIC.includes(src.music))settings.music=src.music;if(PondAudio.WATERS.includes(src.waterType))settings.waterType=src.waterType;for(const key of ['volume','waterVol','weatherVol','musicVol','rainAmount','snowAmount'])if(Number.isFinite(src[key]))settings[key]=clamp(src[key],0,1);
   if(['sunny','cloudy','rain','snow'].includes(src.weather))settings.weather=src.weather;
   settings.speed=clamp(Number(src.speed)||1,.3,2);
@@ -73,7 +77,7 @@ function applyExternalSave(raw){let data;try{data=JSON.parse(raw);}catch{return;
       Object.assign(f,{name:src.name,palette:src.palette,size:src.size,seed:src.seed,marks:src.marks,eaten:Math.max(f.eaten,src.eaten),hunger:Number.isFinite(src.hunger)?src.hunger:f.hunger});if(look)f.spriteReady=false;return f;});
     for(const f of simulation.fish)if(!next.includes(f)&&scene){scene.drop(f.x*width,f.y*height,12*scene.scale,.8);scene.wakes.delete(f);}
     simulation.fish.splice(0,simulation.fish.length,...next);simulation.residentsOn=settings.silverCarp;simulation.allFish.forEach((f,i)=>{if(f.spriteCell!==i)f.spriteReady=false;});uploadSprites();
-    if(settings.quality!==quality)resize();applyWeather();if(settings.autoWeather&&!auto)fetchWeather();syncSound();
+    if(settings.quality!==quality)resize();applyWeather();applyClockCard();if(settings.autoWeather&&!auto)fetchWeather();syncSound();
   }else for(const src of s.fish){const f=byId.get(src.id);if(f)f.eaten=Math.max(f.eaten,src.eaten);}
   editSig=editSignature();updateMeta();if(activePanel==='ranking')renderRanking();}
 window.__pondSync=applyExternalSave;
@@ -107,6 +111,13 @@ function applyVerse(){
   t('verse-a',settings.verseA||'水清鱼读月');
   t('verse-b',settings.verseB||'花静鸟谈天');
   t('verse-seal',Array.from(settings.seal||'闲观').join(' '));
+}
+// 右上角卡片：整张可隐藏，版式跟着 data-clock-style 走，CSS 负责每种长相。设置里的小样和它用同一组 key。
+function applyClockCard(){
+  const card=$('.weather-card');if(!card)return;
+  card.hidden=!settings.clockOn;
+  card.dataset.clockStyle=settings.clockStyle;
+  const note=$('#clock-style-note');if(note)note.textContent=settings.clockOn?clockStyleName(settings.clockStyle):'已隐藏';
 }
 // Sprites are keyed by what they depict; pond fish never change after creation, the preview does.
 function marksHash(marks){let h=marks?marks.length:0;if(marks)for(const m of marks)h=(h*31+Math.round(m.x*10)*7+Math.round(m.y*10)*13+m.r*17+parseInt(m.color.slice(1),16))|0;return h;}
@@ -162,7 +173,7 @@ $('#feed-button').addEventListener('click',()=>{feedMode=!feedMode;$('#feed-butt
 function applyWeather(){document.body.classList.remove('sunny','cloudy','rain','snow','night');document.body.classList.add(settings.weather);document.body.classList.toggle('night',settings.night);const labels={sunny:'晴日',cloudy:'多云',rain:rainLabel(),snow:snowLabel()};const notes={sunny:'风轻水暖，正宜观鱼',cloudy:'云影悠悠，偷得浮生闲',rain:settings.rainAmount>.67?'骤雨打荷，满池飞珠':'一池细雨，满塘清欢',snow:settings.snowAmount>.67?'大雪纷飞，一池素白':'落雪无声，岁月安然'};$('#weather-symbol').innerHTML=icon(settings.night?'moon':settings.weather==='sunny'?'sun':settings.weather);$('#weather-label').textContent=labels[settings.weather];$('#temperature').textContent=settings.autoWeather&&weatherData?`${Math.round(weatherData.temperature_2m)}°C`:'随心天气';$('#weather-location').textContent=settings.autoWeather&&settings.location?settings.location.name:'池畔时光';$('#weather-note').textContent=settings.night&&settings.weather!=='rain'?`月色如水 · 今夜${PondScene.moonPhase().name}`:notes[settings.weather];sound.configure(settings);applyGrade();}
 function rainLabel(){return settings.rainAmount<.34?'小雨':settings.rainAmount<.67?'中雨':'大雨';}
 function snowLabel(){return settings.snowAmount<.34?'小雪':settings.snowAmount<.67?'中雪':'大雪';}
-function clockTick(){const date=new Date();$('#clock').textContent=date.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});$('#clock').dateTime=date.toISOString();$('#calendar').textContent=date.toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'});updateMeta();}clockTick();setInterval(clockTick,1000);applyWeather();applyVerse();
+function clockTick(){const date=new Date();$('#clock').textContent=date.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});$('#clock').dateTime=date.toISOString();$('#calendar').textContent=date.toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'});updateMeta();}clockTick();setInterval(clockTick,1000);applyWeather();applyVerse();applyClockCard();
 const dialog=$('#panel');
 document.querySelectorAll('[data-panel]').forEach(b=>b.addEventListener('click',()=>openPanel(b.dataset.panel)));
 $('.close-panel').addEventListener('click',()=>dialog.close());
@@ -267,16 +278,31 @@ function renderWeather(){
       ? `<div class="setting-row sub"><div>跟随城市天气<small>每 15 分钟同步晴、雨、雪</small></div><input id="auto-weather" type="checkbox" aria-label="跟随城市天气" ${settings.autoWeather ? 'checked' : ''}/></div>`
       : '')
     + `<p class="dialog-footer">城市查询仅发送城市名称，天气查询使用所选城市坐标。<br>天气数据由 <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> 提供，无需 API 密钥。</p>`;
+  // 卡片是「显示卡片」开关的下级：关掉开关，几种版式的小样一起收起。小样本身就是对应版式的微缩图。
+  const clockBody = `<div class="setting-row"><div>显示卡片<small>右上角的时间、日历与天气，关掉后只留一池清水</small></div><input id="clock-on" type="checkbox" aria-label="显示时间与天气卡片" ${settings.clockOn ? 'checked' : ''}/></div>`
+    + `<div class="sub-block${settings.clockOn ? '' : ' is-off'}" id="clock-style-sub">`
+    + `<div class="clock-styles" role="group" aria-label="卡片样式">${CLOCK_STYLES.map(([v, n]) => `<button type="button" class="clock-style${settings.clockStyle === v ? ' selected' : ''}" data-clock-style="${v}" aria-pressed="${settings.clockStyle === v}"><span class="cs-preview" data-clock-style="${v}"><b>12:08</b><i></i></span><span>${n}</span></button>`).join('')}</div></div>`;
 
   prefsHost().innerHTML = `<p class="description">晴日看波光，雨天听水声。让池塘拥有此刻的心情。</p>`
     + `<div class="weather-options">${weathers.map(([v, n, i]) => `<button class="weather-option ${settings.weather === v ? 'selected' : ''}" data-weather="${v}" aria-pressed="${settings.weather === v}">${icon(i)}<span>${n}</span></button>`).join('')}</div>`
     + precip
+    + foldGroup('clockcard', '时间与天气卡片', clockBody, true, `<span class="fold-note" id="clock-style-note">${settings.clockOn ? clockStyleName(settings.clockStyle) : '已隐藏'}</span>`)
     + foldGroup('night', '月下观鱼', `<div class="setting-row"><div>夜色里，池中倒映今夜的月亮</div><input id="night" type="checkbox" aria-label="月下观鱼" ${settings.night ? 'checked' : ''}/></div>` + moonSub, true)
     + foldGroup('grade', '调色', gradeBlock('day', '白天') + gradeBlock('night', '夜晚'), true)
     + foldGroup('city', '天气', cityBody, false, `<span class="fold-note" id="weather-info"></span>`);
 
   updateWeatherInfo();
   document.querySelectorAll('[data-weather]').forEach(b => b.addEventListener('click', () => { settings.weather = b.dataset.weather; settings.autoWeather = false; weatherRequest++; persist(); applyWeather(); renderWeather(); }));
+  $('#clock-on').addEventListener('change', e => {
+    settings.clockOn = e.target.checked;
+    $('#clock-style-sub')?.classList.toggle('is-off', !e.target.checked);
+    applyClockCard(); persist();
+  });
+  document.querySelectorAll('.clock-style[data-clock-style]').forEach(b => b.addEventListener('click', () => {
+    settings.clockStyle = b.dataset.clockStyle;
+    document.querySelectorAll('.clock-style').forEach(x => { const on = x === b; x.classList.toggle('selected', on); x.setAttribute('aria-pressed', on); });
+    applyClockCard(); persist();
+  }));
   $('#night').addEventListener('change', e => {
     settings.night = e.target.checked;
     $('#moon-sub')?.classList.toggle('is-off', !e.target.checked);
