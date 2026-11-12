@@ -17,6 +17,19 @@
   const LOTUS = FLOATERS.filter(f => f[3] === 'f' && f[2] > 25);
   // Flowers, buds and petals have pointed tips, so their ellipses are grown a little to take the tips in.
   const grow = f => f[3] === 'f' || f[3] === 'b' ? 1.1 : f[3] === 'l' ? 1.02 : 1;
+  // One floater as an ellipse in screen space, kept as the inverse of its own axes: exact under the affine
+  // fit (which turns the painting a quarter in portrait) without inverting that fit anywhere.
+  function ellipseAt(R, x, y, rx, ry, rot) {
+    const [cx, cy] = R.imageToScreen(x, y);
+    const [ux, uy] = R.imageToScreen(x + Math.cos(rot) * rx, y + Math.sin(rot) * rx);
+    const [vx, vy] = R.imageToScreen(x - Math.sin(rot) * ry, y + Math.cos(rot) * ry);
+    const a = ux - cx, b = uy - cy, c = vx - cx, d = vy - cy, det = a * d - b * c || 1;
+    return { cx, cy, a, b, c, d, det };
+  }
+  function inEllipse(s, x, y) {
+    const dx = x - s.cx, dy = y - s.cy, u = (s.d * dx - s.c * dy) / s.det, v = (s.a * dy - s.b * dx) / s.det;
+    return u * u + v * v <= 1;
+  }
   // Mask in image space: red = above water (no refraction or caustics), green = casts a shadow on the bed,
   // blue = rests on the water and leaves a wet line (flowers on stalks do not).
   function floatMask(width, height) {
@@ -121,14 +134,32 @@
     constructor(species, rnd) {
       Object.assign(this, { species, rnd, x: -1, y: -1, vx: 0, vy: 0, heading: rnd() * TAU, alt: .8, flap: 0, phase: rnd() * TAU, state: 'fly', target: null, timer: 0, glide: 0, wander: rnd() * TAU, open: .5 });
     }
+    // Where to next: most often a leaf near by to sit on, otherwise a long wander that may leave the window entirely.
     pickTarget(w, h, spots) {
       const r = this.rnd;
-      if (spots.length && r() < .45) { const s = spots[Math.floor(r() * spots.length)]; this.target = { x: s[0] + (r() - .5) * 8, y: s[1] + (r() - .5) * 8, land: true }; }
-      else this.target = { x: w * (.12 + r() * .76), y: h * (.14 + r() * .72), land: false };
-      this.timer = 6 + r() * 8;
+      if (spots.length && r() < .62) {
+        let best = spots[Math.floor(r() * spots.length)], bd = Math.hypot(best[0] - this.x, best[1] - this.y);
+        for (let i = 0; i < 3; i++) { const s = spots[Math.floor(r() * spots.length)], d = Math.hypot(s[0] - this.x, s[1] - this.y); if (d < bd) { bd = d; best = s; } }
+        this.target = { x: best[0] + (r() - .5) * 10, y: best[1] + (r() - .5) * 10, land: true };
+        this.timer = Math.max(7, bd / 45);
+      } else {
+        // Targets can sit well outside the window: the butterfly flies off the edge and finds its way back later.
+        this.target = { x: w * (-.35 + r() * 1.7), y: h * (-.35 + r() * 1.7), land: false };
+        this.timer = 9 + r() * 9;
+      }
+    }
+    // Something came near: up and away, fast and slightly to one side. It will not settle again for a moment.
+    startle(x, y, radius) {
+      if ((this.spook || 0) > 0) return;
+      if (Math.hypot(this.x - x, this.y - y) > radius) return;
+      const a = Math.atan2(this.y - y, this.x - x) + (this.rnd() - .5) * .9, d = 240 + this.rnd() * 220;
+      this.state = 'fly'; this.spook = 2.2 + this.rnd() * 1.6;
+      this.target = { x: this.x + Math.cos(a) * d, y: this.y + Math.sin(a) * d, land: false };
+      this.timer = 3 + this.rnd() * 2; this.alt = Math.max(this.alt, .45);
     }
     update(dt, w, h, scale, spots, time) {
       const r = this.rnd;
+      this.spook = Math.max(0, (this.spook || 0) - dt);
       if (!this.target) this.pickTarget(w, h, spots);
       if (this.state === 'rest') {
         this.timer -= dt; this.alt += (0 - this.alt) * Math.min(1, dt * 3);
@@ -140,12 +171,14 @@
       }
       const t = this.target, dx = t.x - this.x, dy = t.y - this.y, d = Math.hypot(dx, dy);
       this.timer -= dt;
-      if (t.land && d < 10) { this.state = 'rest'; this.timer = 4 + r() * 8; this.vx = this.vy = 0; return; }
-      if ((!t.land && d < 40) || this.timer <= 0) this.pickTarget(w, h, spots);
+      if (t.land && d < 26) { this.state = 'rest'; this.timer = 6 + r() * 10; this.vx = this.vy = 0; return; }
+      if ((!t.land && d < 40) || (this.timer <= 0 && this.spook <= 0)) this.pickTarget(w, h, spots);
       this.wander += (r() - .5) * dt * 9;
-      const sp = (t.land ? clamp(d / 70, .35, 1) : 1) * 95 * scale;
-      const ax = dx / (d || 1) * sp + Math.cos(this.wander) * 45 * scale, ay = dy / (d || 1) * sp + Math.sin(this.wander) * 45 * scale;
-      this.vx += (ax - this.vx) * Math.min(1, dt * 2.2); this.vy += (ay - this.vy) * Math.min(1, dt * 2.2);
+      // Coming in to land: stop wandering, slow down and settle instead of orbiting the leaf.
+      const near = t.land && d < 70, wob = near ? 0 : 45 * scale, ease = near ? dt * 6 : dt * 2.2;
+      const sp = (t.land ? clamp(d / 70, .2, 1) : 1) * (this.spook > 0 ? 2.5 : 1) * 95 * scale;
+      const ax = dx / (d || 1) * sp + Math.cos(this.wander) * wob, ay = dy / (d || 1) * sp + Math.sin(this.wander) * wob;
+      this.vx += (ax - this.vx) * Math.min(1, ease); this.vy += (ay - this.vy) * Math.min(1, ease);
       this.x += this.vx * dt; this.y += this.vy * dt;
       const want = Math.atan2(this.vy, this.vx);
       this.heading += clamp(wrap(want - this.heading), -dt * 6, dt * 6);
@@ -156,7 +189,7 @@
       else { this.phase += dt * TAU * (this.species === 2 ? 6.5 : 9); const s = .5 + .5 * Math.sin(this.phase); this.flap = -.12 + 1.45 * Math.pow(s, .7); }
       const altGoal = t.land ? clamp(d / 120, .05, .8) : .75 + .12 * Math.sin(time * 1.1 + this.phase * .1);
       this.alt += (altGoal - this.alt) * Math.min(1, dt * 1.5);
-      this.x = clamp(this.x, -20, w + 20); this.y = clamp(this.y, -20, h + 20);
+      this.x = clamp(this.x, -w * .5, w * 1.5); this.y = clamp(this.y, -h * .5, h * 1.5);
     }
     draw(R, scale, look) {
       const S = R.sprites, s = scale * .55 * (.9 + this.alt * .35), a = this.heading + Math.PI / 2, wing = S[`bf${this.species}_wing`], body = S[`bf${this.species}_body`];
@@ -173,17 +206,25 @@
 
   // Dragonfly: quick straight darts between hovers, rests on buds, and now and then dips to the water (蜻蜓点水).
   class Dragonfly {
-    constructor(species, rnd) { Object.assign(this, { species, rnd, x: -1, y: -1, vx: 0, vy: 0, heading: rnd() * TAU, alt: .7, state: 'hover', timer: 1, target: null, flap: 0, touched: false }); }
+    constructor(species, rnd) { Object.assign(this, { species, rnd, x: -1, y: -1, vx: 0, vy: 0, heading: rnd() * TAU, alt: .7, state: 'hover', timer: 1, target: null, flap: 0, touched: false, spooked: 0 }); }
     choose(w, h, scale, perches) {
       const r = this.rnd, roll = r(), a = r() * TAU;
       if (roll < .22 && perches.length) { const p = perches[Math.floor(r() * perches.length)]; this.state = 'perch'; this.target = { x: p[0], y: p[1] }; this.timer = 4 + r() * 9; }
       else if (roll < .45) { const d = (50 + r() * 130) * scale; this.state = 'dip'; this.touched = false; this.target = { x: clamp(this.x + Math.cos(a) * d, w * .15, w * .85), y: clamp(this.y + Math.sin(a) * d, h * .15, h * .85) }; }
-      else { const d = (120 + r() * 260) * scale; this.state = 'dart'; this.target = { x: clamp(this.x + Math.cos(a) * d, w * .08, w * .92), y: clamp(this.y + Math.sin(a) * d, h * .1, h * .9) }; }
+      else { const d = (120 + r() * 260) * scale; this.state = 'dart'; this.target = { x: clamp(this.x + Math.cos(a) * d, w * -.12, w * 1.12), y: clamp(this.y + Math.sin(a) * d, h * -.15, h * 1.15) }; }
+    }
+    // A hand comes near: off it shoots, straight away from the disturbance, and it stays airborne for a while.
+    startle(x, y, radius, w, h) {
+      if (this.spooked > 0) return;
+      if (Math.hypot(this.x - x, this.y - y) > radius) return;
+      const a = Math.atan2(this.y - y, this.x - x) + (this.rnd() - .5) * .6, d = 260 + this.rnd() * 200;
+      this.state = 'dart'; this.touched = false; this.spooked = 1.4;
+      this.target = { x: clamp(this.x + Math.cos(a) * d, w * -.15, w * 1.15), y: clamp(this.y + Math.sin(a) * d, h * -.18, h * 1.18) };
     }
     update(dt, w, h, scale, scene, perches, time) {
       const r = this.rnd;
       if (this.x < 0) { this.x = w * (.2 + r() * .6); this.y = h * (.2 + r() * .6); }
-      this.flap += dt;
+      this.flap += dt; this.spooked = Math.max(0, this.spooked - dt);
       if (this.state === 'hover' || this.state === 'rest') {
         this.timer -= dt; this.vx *= Math.exp(-dt * 6); this.vy *= Math.exp(-dt * 6);
         if (this.state === 'hover') { this.x += this.vx * dt + Math.sin(time * 2.3 + this.species) * 5 * scale * dt; this.y += this.vy * dt + Math.cos(time * 3.1) * 4 * scale * dt; this.alt += (.6 - this.alt) * Math.min(1, dt * 2); }
@@ -220,10 +261,11 @@
   // Where crabs live, in painting px [x, y, rx, ry]: the rocks that break the surface and the mossy banks around them.
   const CRAB_HOMES = [[224, 87, 58, 46], [432, 41, 32, 30], [1536, 740, 50, 40], [1639, 628, 42, 46], [120, 190, 58, 30], [1560, 830, 80, 40], [1262, 862, 62, 34]];
   // A small crab: it scuttles sideways about its rock or bank, rests with claws raised, now and then waves one,
-  // and bolts for the water and dives when something startles it, coming up again somewhere else a while later.
+  // and when something startles it, bolts for the nearest leaf and ducks under it — or, with no leaf at hand,
+  // into the water. Either way it does not simply dissolve in the open.
   class Crab {
     constructor(variant, rnd) {
-      Object.assign(this, { variant, rnd, home: 0, u: 0, v: 0, heading: rnd() * TAU, state: 'hidden', timer: 1 + rnd() * 6, walk: 0, speed: 0, target: null, side: 1, alpha: 0, wave: 0, waveT: 0, size: .85 + rnd() * .35, x: 0, y: 0 });
+      Object.assign(this, { variant, rnd, home: 0, u: 0, v: 0, heading: rnd() * TAU, state: 'hidden', timer: 1 + rnd() * 6, walk: 0, speed: 0, wanderTo: [0, 0], goal: null, hideKind: 'water', under: false, side: 1, alpha: 0, wave: 0, waveT: 0, size: .85 + rnd() * .35, x: 0, y: 0 });
     }
     // Position on screen of a point (u, v in the unit disc) of home h.
     at(R, h, u, v) { const [x, y, rx, ry] = CRAB_HOMES[h]; return R.imageToScreen(x + u * rx, y + v * ry); }
@@ -231,67 +273,117 @@
       // Surface on a rock or bank no other crab is on, if there is one.
       const free = homes.filter(h => !taken.includes(h)), pool = free.length ? free : homes, r = this.rnd; this.home = pool[Math.floor(r() * pool.length)]; const a = r() * TAU, d = Math.sqrt(r()) * .7;
       this.u = Math.cos(a) * d; this.v = Math.sin(a) * d; this.state = 'idle'; this.timer = 1 + r() * 3; this.alpha = 0;
+      [this.x, this.y] = this.at(R, this.home, this.u, this.v);
     }
-    startle(x, y, radius) {
-      if (this.state === 'hidden' || this.state === 'dive' || Math.hypot(this.x - x, this.y - y) > radius) return;
-      // Run for the edge of its patch that faces away from the disturbance, then dive.
-      const a = Math.atan2(this.y - y, this.x - x); this.state = 'flee'; this.target = [Math.cos(a) * 1.05, Math.sin(a) * 1.05]; this.timer = 2;
+    // Something came too close. In the water it simply sinks where it stands; on a rock or a leaf it runs for the
+    // nearest leaf and ducks under it, and with no leaf in reach it scuttles to the rim of its own rock — never out
+    // into open water, where it would look like it was walking on the surface.
+    startle(x, y, radius, scene) {
+      if (this.state === 'hidden' || this.state === 'dive' || this.state === 'hide') return;
+      if (Math.hypot(this.x - x, this.y - y) > radius) return;
+      if (!scene) return;
+      const [hcx, hcy] = this.at(scene.R, this.home, 0, 0), [hex, hey] = this.at(scene.R, this.home, 1, 0);
+      const onHome = Math.hypot(this.x - hcx, this.y - hcy) <= Math.hypot(hex - hcx, hey - hcy) * 1.04;
+      // Already in the water: it simply sinks where it stands, rather than skating across the surface.
+      if (!onHome && !scene.onCover(this.x, this.y)) { this.dive(scene); return; }
+      const leaf = scene.nearestLeaf(this.x, this.y, 340 * scene.scale);
+      if (leaf) {
+        // Stop well inside the leaf, not just a third of the way there, so the leaf really does cover the crab.
+        const rr = Math.min(Math.hypot(leaf.a, leaf.b), Math.hypot(leaf.c, leaf.d)) * .5;
+        const dx = this.x - leaf.cx, dy = this.y - leaf.cy, d = Math.hypot(dx, dy) || 1, t = Math.min(d * .3, rr);
+        this.goal = [leaf.cx + dx / d * t, leaf.cy + dy / d * t]; this.hideKind = 'leaf';
+      } else {
+        // Edge of its own patch, on the side away from the disturbance: it slips into the water from there.
+        const a = Math.atan2(this.y - y, this.x - x) || 0;
+        this.goal = this.at(scene.R, this.home, Math.cos(a) * 1.15, Math.sin(a) * 1.15); this.hideKind = 'water';
+      }
+      this.state = 'flee'; this.timer = 6;
+    }
+    // Straight down, with a splash ring and the faint look of something under the surface.
+    dive(scene) {
+      this.state = 'dive'; this.timer = 0;
+      if (scene) scene.drop(this.x, this.y, 4.5 * scene.scale, .35);
     }
     update(dt, R, scale, homes, allowed, scene, taken) {
       const r = this.rnd;
-      if (!allowed && this.state !== 'hidden' && this.state !== 'dive') { this.state = 'flee'; this.target = [this.u * 1.6 + .01, this.v * 1.6]; this.timer = 2; }
+      if (!allowed && this.state !== 'hidden') { this.state = 'hidden'; this.timer = 1 + r() * 5; return; }
       if (this.state === 'hidden') { this.timer -= dt; if (this.timer <= 0 && allowed && homes.length) this.emerge(R, homes, taken); return; }
-      if (this.state === 'dive') { this.alpha -= dt * 1.6; if (this.alpha <= 0) { this.state = 'hidden'; this.timer = 12 + r() * 25; } return; }
+      if (this.state === 'dive') {
+        this.wet = true; this.under = false;
+        this.alpha -= dt * 1.6; if (this.alpha <= 0) { this.state = 'hidden'; this.timer = 12 + r() * 25; } return;
+      }
+      if (this.state === 'hide') {
+        // Out of sight under a leaf, waiting for the coast to clear.
+        this.wet = false; this.under = true;
+        this.speed = 0; this.timer -= dt;
+        if (this.timer <= 0) { this.state = 'hidden'; this.timer = 10 + r() * 22; }
+        return;
+      }
+      // Two places a crab can be: on dry ground (a rock, a leaf, or the mossy bank it lives on) or in the water
+      // below it. Only the water gets the submerged look; the banks are painted into the bed, not annotated.
+      const [hcx, hcy] = this.at(R, this.home, 0, 0), [hex, hey] = this.at(R, this.home, 1, 0);
+      const onHome = Math.hypot(this.x - hcx, this.y - hcy) <= Math.hypot(hex - hcx, hey - hcy) * 1.04;
+      this.wet = !!scene && !onHome && !scene.onCover(this.x, this.y);
+      this.under = !!scene && scene.underLeaf(this.x, this.y);
       this.alpha = Math.min(1, this.alpha + dt * 1.2);
-      const [, , rx, ry] = CRAB_HOMES[this.home], k = Math.hypot(...R.imageToScreen(1, 0).map((c, i) => c - R.imageToScreen(0, 0)[i]));
       if (this.state === 'idle') {
         this.timer -= dt; this.speed *= Math.exp(-dt * 8);
         if (this.waveT <= 0 && r() < dt * .12) this.waveT = 1.2;
         if (this.timer <= 0) {
-          if (r() < .1) { this.state = 'flee'; const a = r() * TAU; this.target = [Math.cos(a) * 1.05, Math.sin(a) * 1.05]; }
-          else { const a = r() * TAU, d = Math.sqrt(r()) * .8; this.target = [Math.cos(a) * d, Math.sin(a) * d]; this.state = 'walk'; this.timer = 6; }
+          if (r() < .1) { const a = r() * TAU; this.goal = this.at(R, this.home, Math.cos(a) * 1.05, Math.sin(a) * 1.05); this.hideKind = 'water'; this.state = 'flee'; this.timer = 6; }
+          else { const a = r() * TAU, d = Math.sqrt(r()) * .8; this.wanderTo = [Math.cos(a) * d, Math.sin(a) * d]; this.state = 'walk'; this.timer = 6; }
         }
       }
       if (this.state === 'walk' || this.state === 'flee') {
-        const [x0, y0] = this.at(R, this.home, this.u, this.v), [x1, y1] = this.at(R, this.home, this.target[0], this.target[1]), dx = x1 - x0, dy = y1 - y0, d = Math.hypot(dx, dy);
+        const flee = this.state === 'flee';
+        const [gx, gy] = flee && this.goal ? this.goal : this.at(R, this.home, this.wanderTo[0], this.wanderTo[1]);
+        const dx = gx - this.x, dy = gy - this.y, d = Math.hypot(dx, dy);
         // Crabs walk sideways: turn so the target lies off one flank, then scuttle.
         const dir = Math.atan2(dy, dx), want = [dir - Math.PI / 2, dir + Math.PI / 2].sort((a, b) => Math.abs(wrap(a - this.heading)) - Math.abs(wrap(b - this.heading)))[0];
         this.side = Math.sin(dir - want) > 0 ? 1 : -1;
         this.heading += clamp(wrap(want - this.heading), -dt * 2.4, dt * 2.4);
-        const go = (this.state === 'flee' ? 80 : 24) * scale * this.size, aligned = Math.abs(wrap(want - this.heading)) < .6 ? 1 : .25;
+        const go = (flee ? 110 : 24) * scale * this.size, aligned = Math.abs(wrap(want - this.heading)) < .6 ? 1 : .25;
         this.speed += (go * aligned - this.speed) * Math.min(1, dt * 6);
         const step = Math.min(d, this.speed * dt);
-        if (d > .5) { this.u += dx / d * step / (rx * k); this.v += dy / d * step / (ry * k); }
+        if (d > .5) { this.x += dx / d * step; this.y += dy / d * step; }
         this.walk += this.speed * dt / (3.6 * scale);
         this.timer -= dt;
-        if (d < 1.5 || this.timer <= 0) {
-          if (this.state === 'flee') { this.state = 'dive'; const [x, y] = this.at(R, this.home, this.u, this.v); scene.drop(x, y, 4 * scale, .3); }
-          else { this.state = 'idle'; this.timer = 2 + r() * 7; }
-        }
+        if (d < 2) {
+          if (flee) {
+            if (this.hideKind === 'leaf') { this.state = 'hide'; this.timer = 7 + r() * 15; this.under = true; }
+            else this.dive(scene);
+          } else { this.state = 'idle'; this.timer = 2 + r() * 7; }
+        } else if (!flee && this.timer <= 0) { this.state = 'idle'; this.timer = 2 + r() * 7; }
       }
       if (this.waveT > 0) this.waveT -= dt;
-      [this.x, this.y] = this.at(R, this.home, this.u, this.v);
     }
     draw(R, scale, look) {
       if (this.state === 'hidden' || this.alpha <= 0) return;
+      // Three places to be drawn: behind the leaves (hiding under one), inside the water (submerged, so the
+      // water's refraction and colour take it), or on top (standing on a rock or a leaf).
+      const L = this.under ? 'crawl' : this.wet ? 'under' : 'surface';
       const S = R.sprites, v = this.variant, s = scale * 1.05 * this.size, a = this.heading, c = Math.cos(a), si = Math.sin(a), A = this.alpha;
-      const lit = [look.bright * look.tint[0] * A, look.bright * look.tint[1] * A, look.bright * look.tint[2] * A, A];
+      const B = look.bright * A, wat = look.water;
+      const lit = this.wet
+        ? [B * (look.tint[0] * .45 + wat[0] * .88), B * (look.tint[1] * .45 + wat[1] * .88), B * (look.tint[2] * .45 + wat[2] * .88), A * .92]
+        : [B * look.tint[0], B * look.tint[1], B * look.tint[2], A];
       const at = (lx, ly) => [this.x + (lx * c - ly * si) * s, this.y + (lx * si + ly * c) * s];
       const moving = this.speed > 2 * scale, sh = [0, 0, 0, .34 * A], od = 3.4 * scale;
-      R.sprite('surface', S[`crab${v}_body`], this.x + look.shadowDir[0] * od, this.y + look.shadowDir[1] * od, a, s * 1.08, s * 1.08, sh);
+      // A crab under the surface casts no shadow on the water; it is already below it.
+      if (!this.wet) R.sprite(L, S[`crab${v}_body`], this.x + look.shadowDir[0] * od, this.y + look.shadowDir[1] * od, a, s * 1.08, s * 1.08, sh);
       // Four walking legs a side; while scuttling they swing in two alternating sets.
       for (const side of [1, -1]) for (let i = 0; i < 4; i++) {
         const [px, py] = at(1.9 - i * 1.35, side * 3.6), swing = moving ? Math.sin(this.walk + (i % 2) * Math.PI + (side > 0 ? 0 : Math.PI / 2)) * .32 : Math.sin(scale + i) * .03;
         const ang = a + side * (Math.PI / 2 + (i - 1.3) * .36 + swing);
-        R.sprite('surface', S[`crab${v}_leg`], px + look.shadowDir[0] * od * .6, py + look.shadowDir[1] * od * .6, ang, s, side * s, [0, 0, 0, .22 * A]);
-        R.sprite('surface', S[`crab${v}_leg`], px, py, ang, s, side * s, lit);
+        if (!this.wet) R.sprite(L, S[`crab${v}_leg`], px + look.shadowDir[0] * od * .6, py + look.shadowDir[1] * od * .6, ang, s, side * s, [0, 0, 0, .22 * A]);
+        R.sprite(L, S[`crab${v}_leg`], px, py, ang, s, side * s, lit);
       }
       // Claws held forward; one lifts and waves now and then.
       for (const side of [1, -1]) {
         const [px, py] = at(4.4, side * 2.5), raise = side > 0 && this.waveT > 0 ? Math.sin((1.2 - this.waveT) * 9) * .5 * Math.min(1, this.waveT * 3) : 0;
-        R.sprite('surface', S[`crab${v}_claw`], px, py, a + side * (.55 + raise), s * (1 + Math.abs(raise) * .15), side * s, lit);
+        R.sprite(L, S[`crab${v}_claw`], px, py, a + side * (.55 + raise), s * (1 + Math.abs(raise) * .15), side * s, lit);
       }
-      R.sprite('surface', S[`crab${v}_body`], this.x, this.y, a, s, s, lit);
+      R.sprite(L, S[`crab${v}_body`], this.x, this.y, a, s, s, lit);
     }
   }
 
@@ -315,8 +407,34 @@
       this.spots = []; this.finTint = PALETTES.map(p => [...rgb(p.fin), .9]);
     }
     dragonflyWeather(settings) { return settings.butterflies && !settings.night && (settings.weather === 'sunny' || settings.weather === 'cloudy'); }
-    // Something disturbed the water at (x, y): crabs close by bolt for it and dive.
-    startle(x, y) { for (const c of this.crabs) c.startle(x, y, 130 * this.scale); }
+    // Something disturbed the water at (x, y): crabs close by bolt for cover, and anything with wings takes off.
+    startle(x, y) {
+      for (const c of this.crabs) c.startle(x, y, 130 * this.scale, this);
+      for (const b of this.butterflies) b.startle(x, y, 110 * this.scale);
+      for (const d of this.dragonflies) d.startle(x, y, 140 * this.scale, this.w, this.h);
+    }
+    // A hand moving over the pond is enough to send the winged things off, without any click.
+    brush(x, y) {
+      for (const b of this.butterflies) b.startle(x, y, 80 * this.scale);
+      for (const d of this.dragonflies) d.startle(x, y, 95 * this.scale, this.w, this.h);
+    }
+    // Is this screen point on something that floats — a leaf, a flower, a bud, a rock? Then it is not open water:
+    // no food, no ripples. Only what is drawn in the painting's water can be tapped.
+    onCover(x, y) {
+      for (const s of this.cover || []) if (inEllipse(s, x, y)) return true;
+      return false;
+    }
+    // Is this point under a leaf? A crab that walks there is drawn before the leaves and so disappears behind one.
+    underLeaf(x, y) {
+      for (const s of this.leaves || []) if (inEllipse(s, x, y)) return true;
+      return false;
+    }
+    // The leaf a startled crab should make for, if one is close enough to reach.
+    nearestLeaf(x, y, max) {
+      let best = null, bd = max;
+      for (const s of this.leaves || []) { const d = Math.hypot(s.cx - x, s.cy - y); if (d < bd) { bd = d; best = s; } }
+      return best;
+    }
     drop(x, y, r, s) { this.R.drop(x, y, r, s); for (const p of this.petals) { const dx = p.x - x, dy = p.y - y, d = Math.hypot(dx, dy); if (d < r * 8 && d > 0) { p.vx += dx / d * s * 40; p.vy += dy / d * s * 40; } } }
     splash(x, y, s, leaf) {
       if (this.splashes.length > 260) return;
@@ -339,9 +457,29 @@
       this.spots = FLOATERS.filter(f => f[3] !== 'r' && f[2] > 25).map(([x, y]) => R.imageToScreen(x, y)).filter(inside);
       this.buds = FLOATERS.filter(f => f[3] === 'b').map(([x, y, rx, k, ry = rx, rot = 0]) => R.imageToScreen(x - Math.sin(rot) * ry * .7, y - Math.cos(rot) * ry * .7)).filter(inside);
       for (const d of this.dragonflies) { d.x = -1; d.state = 'hover'; d.timer = 1; }
-      // Koi may slip under the rim of a leaf, but not through rocks.
+      // Koi may slip under the rim of a leaf, but never through rock. A rock is solid ground: its ellipse is
+      // covered by a run of circles along the long axis, so there is no corner a koi can cut.
       const [x0, y0] = R.imageToScreen(0, 0), [x1, y1] = R.imageToScreen(1, 0), k = Math.hypot(x1 - x0, y1 - y0);
-      this.sim.obstacles = FLOATERS.filter(f => f[2] > 25).map(([x, y, rx, kind, ry = rx]) => { const [sx, sy] = R.imageToScreen(x, y); return { x: sx, y: sy, r: Math.min(rx, ry) * k * (kind === 'r' ? .95 : .55) }; });
+      this.sim.obstacles = [];
+      for (const [x, y, rx, kind, ry = rx, rot = 0] of FLOATERS) {
+        if (rx <= 25) continue;
+        const [sx, sy] = R.imageToScreen(x, y);
+        if (kind !== 'r') { this.sim.obstacles.push({ x: sx, y: sy, r: Math.min(rx, ry) * k * .55, hard: false }); continue; }
+        const e = ellipseAt(R, x, y, rx, ry, rot);
+        const lu = Math.hypot(e.a, e.b), lv = Math.hypot(e.c, e.d), long = Math.max(lu, lv), short = Math.min(lu, lv);
+        const dx = lu >= lv ? e.a / lu : e.c / lv, dy = lu >= lv ? e.b / lu : e.d / lv;
+        const spread = Math.max(0, long - short) * .72;
+        for (const t of [-1, 0, 1]) this.sim.obstacles.push({ x: sx + dx * spread * t, y: sy + dy * spread * t, r: short * .98, hard: true });
+      }
+      // Everything sitting on or above the water — leaves, flowers, buds, rocks — is not open water to tap on.
+      this.cover = FLOATERS.map(([x, y, rx, kind, ry = rx, rot = 0]) => {
+        const g = grow([x, y, rx, kind, ry, rot]);
+        return ellipseAt(R, x, y, rx * g, ry * g, rot);
+      });
+      // The leaves a crab can duck under: big enough to cover it, and only the ones on screen.
+      this.leaves = FLOATERS.filter(f => f[3] === 'l' && f[2] > 20)
+        .map(([x, y, rx, , ry = rx, rot = 0]) => ellipseAt(R, x, y, rx, ry, rot))
+        .filter(s => s.cx > -60 && s.cx < w + 60 && s.cy > -60 && s.cy < h + 60);
       // Leaves, flowers and rocks on screen, weighted by area, for raindrops to land on.
       this.targets = []; this.targetArea = 0;
       for (const fl of this.floaters) {
@@ -364,6 +502,14 @@
       // Clouds sail right and a little down the screen at a pace that reads as moving without hurrying.
       const span = Math.max(this.w, this.h);
       Object.assign(this.look, { sun: [-.45, .45, .77], moonDisc: this.moonDisc || [0, 0, 1, 0], causticCell: this.causticCell || 80, cloudWind: [.021 * span, -.007 * span] });
+      // Moonlight: after dark it is the only thing lighting the koi. Day and night each carry their own grade,
+      // so turning one never disturbs the other.
+      const want = night ? clamp(Number(amounts.moonlight ?? .55) || 0, 0, 1) : 0;
+      this.look.moonlight = dt === undefined || this.look.moonlight === undefined ? want : this.look.moonlight + (want - this.look.moonlight) * Math.min(1, dt * 2);
+      const pre = night ? 'night' : 'day';
+      this.look.contrast = clamp(Number(amounts[pre + 'Contrast'] ?? 1) || 1, .6, 1.6);
+      this.look.brightness = clamp(Number(amounts[pre + 'Bright'] ?? 1) || 1, .5, 1.8);
+      this.look.hue = clamp(Number(amounts[pre + 'Hue'] ?? 0) || 0, -90, 90) * Math.PI / 180;
     }
     update(dt, settings) {
       this.time += dt;

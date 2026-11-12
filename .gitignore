@@ -10,3 +10,6 @@ native/windows/obj/
 .claude/
 node_modules/
 .DS_Store
+
+# WorkBuddy 会话与备忘（不进仓库）
+.workbuddy/

@@ -182,12 +182,35 @@ void main(){
   return smoothstep(.36, .72, m);
 }`;
 
+  // Grading shared by the water and everything floating on it: contrast about mid grey, a turn of the hue wheel
+  // about the grey axis, a brightness multiplier, and moonlight — a cool wash that lifts the koi out of the dark.
+  const GRADE = `
+uniform float uContrast, uBrightness, uHue, uMoonlight; uniform vec2 uMoonPos;
+vec3 grade(vec3 c, vec2 screenPx, vec2 view){
+  c = (c - .5) * uContrast + .5;
+  if (uHue != 0.) {
+    vec3 ax = vec3(.57735027);
+    float ca = cos(uHue), sa = sin(uHue);
+    c = c * ca + cross(ax, c) * sa + ax * dot(ax, c) * (1. - ca);
+  }
+  c *= uBrightness;
+  c = max(c, 0.);
+  if (uMoonlight > 0.) {
+    // Cool moonlight over the whole pond, strongest toward the viewer and fading with distance.
+    vec2 d = (screenPx - uMoonPos) / (min(view.x, view.y) * .92);
+    float k = exp(-dot(d, d) * 1.35) * uMoonlight;
+    c *= 1. + .55 * k;
+    c += vec3(.40, .52, .78) * .05 * k;
+  }
+  return c;
+}`;
   const FS_FINAL = `#version 300 es
 precision highp float;
 uniform sampler2D uScene, uSurface, uFloat, uNoise, uCloud;
 uniform vec4 uMoonDisc; uniform vec3 uBedU, uBedV; uniform vec2 uView;
 uniform float uRefract, uGlint, uSkyK, uVignette, uMoon, uBright, uSat, uShade, uTime, uCloudShade, uMist, uFlash;
 uniform vec3 uGlintColor, uSky, uTint, uSun;
+${GRADE}
 in vec2 vUv; out vec4 o;
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 ${MIST}
@@ -239,6 +262,16 @@ void main(){
   col *= 1. - fm.b * (1. - fm.r) * .22;
   float l = dot(col, vec3(.299, .587, .114));
   col = mix(vec3(l), col, uSat) * uBright * uTint + night;
+  col = grade(col, vUv * uView, uView);
+  // The moon's reflection on the water: a path running down from the disc. Every wave bends it sideways (the slope
+  // shifts the path) and brightens or dims it, so it swims with the ripples instead of sitting still on the surface.
+  if (uMoon > 0. && uMoonlight > 0.) {
+    vec2 mpx = vUv * uView;
+    float sway = mpx.x + g.x * 52. + g.y * 14.;
+    float mpath = exp(-pow((sway - uMoonDisc.xy.x) / (uMoonDisc.z * 1.9), 2.)) * smoothstep(uMoonDisc.y + 30., 0., mpx.y);
+    float weave = .30 + .70 * (.5 + .5 * sin(g.y * 42. + uTime * 1.5));
+    col += vec3(.78, .86, 1.) * mpath * weave * uMoonlight * .95;
+  }
   // Rain mist drifting low over the water in slow banks.
   if (uMist > 0.) col = mix(col, uSky * uBright * 1.08, mistAt(vUv * uView, uTime) * uMist);
   col += uFlash * (col * 1.3 + vec3(.1, .12, .16));
@@ -267,6 +300,7 @@ void main(){
 precision highp float;
 uniform sampler2D uBed, uSurface, uNoise, uCloud; uniform vec2 uView;
 uniform float uBright, uSat, uVignette, uShade, uSnow, uSkyK, uWet, uRain, uTime, uCloudShade, uMist, uFlash; uniform vec3 uTint, uSky;
+${GRADE}
 in vec2 vUv; in vec2 vLocal; in vec2 vScreen; in vec2 vTilt; in float vSnowK; in float vWet; in float vPool; in float vSeed; out vec4 o;
 ${MIST}
 void main(){
@@ -336,6 +370,7 @@ void main(){
   c = mix(c, uSky, uSkyK * .8);
   float l = dot(c, vec3(.299, .587, .114));
   c = mix(vec3(l), c, uSat) * uBright * uTint;
+  c = grade(c, vScreen * uView, uView);
   if (uMist > 0.) c = mix(c, uSky * uBright * 1.08, mistAt(vScreen * uView, uTime) * uMist);
   c += uFlash * (c * 1.3 + vec3(.1, .12, .16));
   vec2 v = vScreen - .5;
@@ -398,7 +433,7 @@ void main(){
     }
   }
   const WHITE = [1, 1, 1, 1];
-  const LAYERS = ['shadow', 'under', 'floaters', 'surface', 'airShadow', 'air', 'glow'];
+  const LAYERS = ['shadow', 'under', 'crawl', 'floaters', 'surface', 'airShadow', 'air', 'glow'];
 
   // Shelf-pack misc sprites under the fish cells.
   function packSprites(sprites) {
@@ -631,15 +666,22 @@ void main(){
       gl.uniform1f(p.u('uVignette'), env.vignette); gl.uniform1f(p.u('uMoon'), env.moon); gl.uniform1f(p.u('uBright'), env.bright); gl.uniform1f(p.u('uSat'), env.sat); gl.uniform1f(p.u('uShade'), env.shade);
       gl.uniform3fv(p.u('uGlintColor'), env.glintColor); gl.uniform3fv(p.u('uSky'), env.sky); gl.uniform3fv(p.u('uTint'), env.tint); gl.uniform3fv(p.u('uSun'), env.sun);
       gl.uniform1f(p.u('uCloudShade'), env.cloudShade); gl.uniform1f(p.u('uMist'), env.mist || 0); gl.uniform1f(p.u('uFlash'), env.flash || 0);
+      gl.uniform1f(p.u('uContrast'), env.contrast ?? 1); gl.uniform1f(p.u('uBrightness'), env.brightness ?? 1); gl.uniform1f(p.u('uHue'), env.hue || 0); gl.uniform1f(p.u('uMoonlight'), env.moonlight || 0);
+      gl.uniform2f(p.u('uMoonPos'), w * .5, h * .3);
       setBed(p); gl.uniform4fv(p.u('uMoonDisc'), env.moonDisc); gl.uniform1f(p.u('uTime'), time);
       bindTex(0, state.scene.tex); gl.uniform1i(p.u('uScene'), 0); bindTex(1, state.surface.tex); gl.uniform1i(p.u('uSurface'), 1);
       bindTex(2, noiseTex); gl.uniform1i(p.u('uNoise'), 2); bindTex(3, floatTex); gl.uniform1i(p.u('uFloat'), 3); bindTex(4, state.cloud.tex); gl.uniform1i(p.u('uCloud'), 4);
       drawQuad();
+      // Crabs that have ducked under a leaf: drawn beneath the leaves, so the leaf's own edge is what hides them.
+      // Crabs that have ducked under a leaf: drawn beneath the leaves, so the leaf's own edge is what hides them.
+      if (batches.crawl.ni) { gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA); drawBatch(batches.crawl, 0, 0, 0); }
       // Leaves and flowers above the water.
       if (batches.floaters.ni) {
         gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         p = P.floater; gl.useProgram(p);
         gl.uniform2f(p.u('uView'), w, h); gl.uniform1f(p.u('uBright'), env.bright); gl.uniform1f(p.u('uSat'), env.sat); gl.uniform1f(p.u('uVignette'), env.vignette); gl.uniform1f(p.u('uShade'), env.shade); gl.uniform3fv(p.u('uTint'), env.tint);
+        gl.uniform1f(p.u('uContrast'), env.contrast ?? 1); gl.uniform1f(p.u('uBrightness'), env.brightness ?? 1); gl.uniform1f(p.u('uHue'), env.hue || 0); gl.uniform1f(p.u('uMoonlight'), env.moonlight || 0);
+        gl.uniform2f(p.u('uMoonPos'), w * .5, h * .3);
         gl.uniform1f(p.u('uSnow'), env.snowCover || 0); gl.uniform1f(p.u('uSkyK'), env.skyK); gl.uniform3fv(p.u('uSky'), env.sky);
         gl.uniform1f(p.u('uWet'), env.wetCover || 0); gl.uniform1f(p.u('uRain'), env.rainK || 0); gl.uniform1f(p.u('uTime'), time); gl.uniform1f(p.u('uCloudShade'), env.cloudShade);
         gl.uniform1f(p.u('uMist'), env.mist || 0); gl.uniform1f(p.u('uFlash'), env.flash || 0);

@@ -14,13 +14,15 @@
   // Fish body in local units: nose at +34, tail tip at -58; sprites span x -60..36, y -14..14.
   const BODY = { nose: 34, tail: -58, length: 92, segments: 16, rigid: 5, left: -60, width: 96, half: 14 };
   const TAU = Math.PI * 2;
+  // Seconds a koi takes to go from a full belly to ravenous (×each fish's own metabolism).
+  const HUNGER_TIME = 480;
   function randomSeed(seed) { let s = seed >>> 0; return () => { s = (1664525 * s + 1013904223) >>> 0; return s / 4294967296; }; }
   function weatherFromCode(code) { if ([71,73,75,77,85,86].includes(code)) return 'snow'; if (code >= 51) return 'rain'; if (code >= 2) return 'cloudy'; return 'sunny'; }
   const clamp = (x,a,b) => Math.max(a,Math.min(b,x));
   const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
   function createFish(index, random = Math.random) {
     const names = ['锦时','小满','丹朱','听雨','白露','金盏','青禾','望舒','知秋','浮玉','映月','点绛','云游','春水','琥珀','松墨','桃夭','长安','涟漪','拾光','朝露','小暑','如意','团团'];
-    return { id: `koi-${Date.now()}-${index}`, name: names[index % names.length], palette: index % PALETTES.length, size: .62 + random() * .4, seed: Math.floor(random()*100000), eaten: 0, x: .17 + random()*.66, y: .18+random()*.62, angle: random()*TAU, phase: random()*10, speed: .85+random()*.3, target: null };
+    return { id: `koi-${Date.now()}-${index}`, name: names[index % names.length], palette: index % PALETTES.length, size: .62 + random() * .4, seed: Math.floor(random()*100000), eaten: 0, hunger: .28 + random() * .24, x: .17 + random()*.66, y: .18+random()*.62, angle: random()*TAU, phase: random()*10, speed: .85+random()*.3, target: null };
   }
   // Resident shoal is separate from the saved koi collection and its 60-fish limit.
   function createSilverCarpShoal(random = Math.random) {
@@ -37,6 +39,9 @@
     f.goal = null; f.goalTime = 0; f.rest = 0; f.flee = 0; f.fleeAngle = 0;
     f.cruise = (.3 + random() * .22) * clamp(Number(f.speed) || 1, .5, 1.5);
     f.react = .15 + random() * .9; f.appetite = .55 + random() * .45;
+    // Metabolism is per fish, so the shoal does not get hungry in lockstep.
+    f.hungerRate = .75 + random() * .6;
+    if (typeof f.hunger !== 'number' || !Number.isFinite(f.hunger)) f.hunger = .3 + random() * .2;
     f.spine = null; f.spineSeg = 0;
   }
   // Head-led chain: the front of the body is rigid, the rest follows the path the head swam.
@@ -80,7 +85,10 @@
     get allFish() { return this.residentsOn?this.fish.concat(this.residents):this.fish; }
     feed(x,y,count=9) {
       if(this.food.length >= 180) return false;
-      for(let i=0;i<count && this.food.length<180;i++){const a=this.random()*TAU,r=Math.sqrt(this.random())*24;this.food.push({x:clamp(x+Math.cos(a)*r,15,this.width-15),y:clamp(y+Math.sin(a)*r,15,this.height-15),life:25,age:0,drift:this.random()*6,vx:Math.cos(a)*r*.8,vy:Math.sin(a)*r*.8,eaten:false});}
+      for(let i=0;i<count && this.food.length<180;i++){const a=this.random()*TAU,r=Math.sqrt(this.random())*24;let px=x+Math.cos(a)*r,py=y+Math.sin(a)*r;
+        // A pellet that lands in the ring around a rock that a koi cannot reach would sit there until it rotted:/n        // nudge it out past the stone, where a fish can actually get its mouth to it.
+        for(const ob of this.obstacles)if(ob.hard){const dx=px-ob.x,dy=py-ob.y,d=Math.hypot(dx,dy)||1,R=ob.r+30;if(d<R){px=ob.x+dx/d*R;py=ob.y+dy/d*R;}}
+        this.food.push({x:clamp(px,15,this.width-15),y:clamp(py,15,this.height-15),life:25,age:0,drift:this.random()*6,vx:Math.cos(a)*r*.8,vy:Math.sin(a)*r*.8,eaten:false});}
       return true;
     }
     // A tap without food startles nearby fish into a short dash away from it.
@@ -99,13 +107,34 @@
       const sdt=dt*clamp(speedFactor,.1,3);
       const neighbours=this.allFish;
       for(const f of neighbours)wake(f,this.random);
+      // Hunger creeps up with the clock, at each fish's own pace. The resident silver carp forage for themselves.
+      for(const f of neighbours)if(f.species!=='silvercarp')f.hunger=Math.min(1,f.hunger+dt/(HUNGER_TIME*f.hungerRate));
       for(const f of neighbours)this.swim(f,sdt,neighbours);
       if(this.food.some(p=>p.eaten))this.food=this.food.filter(p=>!p.eaten);
+    }
+    // If a rock stands in the way of where the fish wants to go, this returns the angle to swim instead: along the
+    // rock's rim, on the side that still makes progress toward the goal. Null when the way is clear.
+    rockRim(x, y, dirX, dirY, L, goalDist) {
+      for (const ob of this.obstacles) {
+        if (!ob.hard) continue;
+        const dx = ob.x - x, dy = ob.y - y, dist = Math.hypot(dx, dy) || 1, reach = ob.r + L * .3;
+        if (dist > reach + L * 2.6) continue;             // too far off to matter yet
+        if (dist > goalDist + ob.r * .5) continue;         // the goal is nearer than the rock: no need to go round
+        const along = dx * dirX + dy * dirY;              // how far ahead the rock sits
+        const across = Math.abs(dx * dirY - dy * dirX);   // how far off the line it sits
+        if (along < 0 || across > reach) continue;        // behind us, or the line passes clear
+        const nx = dx / dist, ny = dy / dist;             // pointing away from the rock
+        let tx = -ny, ty = nx;                            // along its rim
+        if (tx * dirX + ty * dirY < 0) { tx = -tx; ty = -ty; }
+        return Math.atan2(ty, tx);
+      }
+      return null;
     }
     swim(f,dt,neighbours=this.allFish) {
       const w=this.width,h=this.height,s=f.size*this.scale,L=BODY.length*s,random=this.random,silver=f.species==='silvercarp';
       let x=f.x*w,y=f.y*h;const cos=Math.cos(f.angle),sin=Math.sin(f.angle),mx=x+cos*BODY.nose*s,my=y+sin*BODY.nose*s;
-      let food=null,fd=Infinity;const reach=Math.max(w,h)*f.appetite;
+      // A full koi barely notices food; an empty one spots it from across the pond.
+      const blocked=f.blocked||0;f.blocked=0;let food=null,fd=Infinity;const reach=Math.max(w,h)*f.appetite*(.5+.5*f.hunger);
       for(const p of (f.species === 'silvercarp' ? [] : this.food)){if(p.eaten)continue;const d=Math.hypot(p.x-mx,p.y-my);if(d<fd&&d<reach&&p.age>f.react+d/650){fd=d;food=p;}}
       let gx,gy,want,turnGain=silver?3.5:2,maxTurn=silver?2.4:1.3,sepW=2.4,boundW=3;
       f.flee=Math.max(0,f.flee-dt);
@@ -115,16 +144,19 @@
         const dx=food.x-x,dy=food.y-y,d=Math.hypot(dx,dy)||1,err=Math.abs(wrap(Math.atan2(dy,dx)-f.angle));
         gx=dx/d;gy=dy/d;want=clamp(fd/L*1.3,.25,2.2)*L*Math.max(.12,Math.cos(Math.min(err,Math.PI/2))**2);
         // Food under the body can't be reached by pivoting; swim on to open a gap, then come back around.
-        if(d<BODY.nose*s*1.15&&err>.6){gx=cos;gy=sin;want=.7*L;}
+        if(d<BODY.nose*s*1.15&&err>.6&&!blocked){gx=cos;gy=sin;want=.7*L;}
         turnGain=4.5;maxTurn=3.4;sepW=1.1;boundW=.8;f.depthGoal=.04;
-        if(fd<Math.max(6,7*s)){food.eaten=true;f.eaten++;this.totalEaten++;this.events.push({type:'eat',x:food.x,y:food.y,fish:f});}
+        // A hungry koi throws itself at the food; a full one only picks at what drifts past it.
+        want*=.3+.7*f.hunger;
+        if(fd<Math.max(6,7*s)){food.eaten=true;f.eaten++;f.hunger=Math.max(0,f.hunger-.09);this.totalEaten++;this.events.push({type:'eat',x:food.x,y:food.y,fish:f});}
       } else {
         f.goalTime-=dt;
         if(!f.goal||f.goalTime<=0||Math.hypot(f.goal.x*w-x,f.goal.y*h-y)<L*1.3)this.pickGoal(f);
         const a=Math.atan2(f.goal.y*h-y,f.goal.x*w-x)+Math.sin(this.time*.21+f.seed)*.45+Math.sin(this.time*.53+f.seed*1.7)*.2;
         gx=Math.cos(a);gy=Math.sin(a);
         f.rest=Math.max(0,f.rest-dt);if(f.rest<=0&&random()<dt*.02)f.rest=silver?.6+random()*1.2:2+random()*4;
-        want=f.cruise*L*(f.rest>0?.12:1);
+        // An empty belly shows in the tail: the hungrier the koi, the more it holds back. A meal brings the pace back.
+        want=f.cruise*L*(f.rest>0?.12:1)*(silver?1:1-.55*f.hunger);
         if(random()<dt*.015)f.depthGoal=silver?.18+random()*.4:.15+random()*.75;
       }
       // Neighbours: keep personal space, sidestep head-on meetings, loosely match heading.
@@ -145,7 +177,13 @@
       if(ly<mY)by=(mY-ly)/mY;else if(ly>h-mY)by=(h-mY-ly)/mY;
       for(const ob of this.obstacles)for(const [px,py,R] of [[lx,ly,ob.r+L*.4],[x,y,ob.r+L*.2]]){const dx=px-ob.x,dy=py-ob.y,d=Math.hypot(dx,dy)||1;if(d<R){const k=(1-d/R)*2.5;bx+=dx/d*k;by+=dy/d*k;}}
       const desired=Math.atan2(gy+sy*sepW+ay*.15+by*boundW,gx+sx*sepW+ax*.15+bx*boundW);
-      f.turn+=(clamp(wrap(desired-f.angle)*turnGain,-maxTurn,maxTurn)-f.turn)*Math.min(1,dt*(f.flee>0?14:silver?7:4));
+      // If a rock stands between the fish and where it is heading, follow the rim of the rock instead of butting
+      // into it — on the side that still makes progress toward the goal. Without this a koi whose food lies straight
+      // behind a rock presses against it forever.
+      const goalDist=food?fd:(f.goal?Math.hypot(f.goal.x*w-x,f.goal.y*h-y):1e9);
+      const rim=f.flee>0?null:this.rockRim(x,y,Math.cos(desired),Math.sin(desired),L,goalDist);
+      if(rim!==null)f.turn+=(clamp(wrap(rim-f.angle)*6,-maxTurn*1.6,maxTurn*1.6)-f.turn)*Math.min(1,dt*8);
+      else f.turn+=(clamp(wrap(desired-f.angle)*turnGain,-maxTurn,maxTurn)-f.turn)*Math.min(1,dt*(f.flee>0?14:silver?7:4));
       f.angle=wrap(f.angle+f.turn*dt);
       // Beat-and-glide: a few tail strokes to speed up, then coast.
       if(f.v<want*.8)f.beating=true;else if(f.v>want*1.15)f.beating=false;
@@ -157,6 +195,9 @@
       f.phase=(f.phase+dt*TAU*(silver?1.22:1)*(.45+f.thrust*(1.1+1.3*Math.min(2.5,bl))+Math.abs(f.turn)*.35))%(TAU*1000);
       f.amp+=((.14+.86*f.thrust*Math.min(1,.5+bl*.6)+Math.min(.4,Math.abs(f.turn)*.25))-f.amp)*Math.min(1,dt*3);
       x+=Math.cos(f.angle)*f.v*dt;y+=Math.sin(f.angle)*f.v*dt;
+      // Solid rock is not swimmable: a koi that overlaps it is pushed back out, twice round so a run of
+      // overlapping circles (one rock, several circles) cannot squeeze it through a gap.
+      for(let pass=0;pass<2;pass++)for(const ob of this.obstacles)if(ob.hard){const dx=x-ob.x,dy=y-ob.y,d=Math.hypot(dx,dy)||1,R=ob.r+L*.25;if(d<R){x=ob.x+dx/d*R;y=ob.y+dy/d*R;f.blocked=1;if(Math.cos(f.angle)*dx/Math.abs(d)+Math.sin(f.angle)*dy/Math.abs(d)<0)f.v*=.85;}}
       f.x=clamp(x/w,.03,.97);f.y=clamp(y/h,.035,.965);
       f.depth+=(f.depthGoal-f.depth)*Math.min(1,dt*(food?1.2:.35));
       updateSpine(f,s,w,h);
@@ -166,11 +207,11 @@
     if(!data||!Array.isArray(data.fish)||!data.fish.length) return null;
     const fish=data.fish.slice(0,60).filter(f=>f&&typeof f.name==='string').map((f,i)=>{
       const defaults=createFish(i,randomSeed(i+8));
-      return {...defaults,id:typeof f.id==='string'?f.id.slice(0,80):defaults.id,name:f.name.trim().slice(0,12)||defaults.name,palette:Number.isInteger(f.palette)?clamp(f.palette,0,PALETTES.length-1):0,size:clamp(Number(f.size)||.8,.45,1.5),seed:Number.isFinite(f.seed)?f.seed:defaults.seed,eaten:clamp(Math.floor(Number(f.eaten)||0),0,9999999),marks:Array.isArray(f.marks)?f.marks.slice(0,400).filter(m=>m&&Number.isFinite(m.x)&&Number.isFinite(m.y)&&Number.isFinite(m.r)&&/^#[0-9a-f]{6}$/i.test(m.color)).map(m=>({x:clamp(m.x,-32,32),y:clamp(m.y,-16,16),r:clamp(m.r,1,8),color:m.color})):[]};
+      return {...defaults,id:typeof f.id==='string'?f.id.slice(0,80):defaults.id,name:f.name.trim().slice(0,12)||defaults.name,palette:Number.isInteger(f.palette)?clamp(f.palette,0,PALETTES.length-1):0,size:clamp(Number(f.size)||.8,.45,1.5),seed:Number.isFinite(f.seed)?f.seed:defaults.seed,eaten:clamp(Math.floor(Number(f.eaten)||0),0,9999999),hunger:Number.isFinite(Number(f.hunger))?clamp(Number(f.hunger),0,1):defaults.hunger,marks:Array.isArray(f.marks)?f.marks.slice(0,400).filter(m=>m&&Number.isFinite(m.x)&&Number.isFinite(m.y)&&Number.isFinite(m.r)&&/^#[0-9a-f]{6}$/i.test(m.color)).map(m=>({x:clamp(m.x,-32,32),y:clamp(m.y,-16,16),r:clamp(m.r,1,8),color:m.color})):[]};
     });
     return fish.length?{fish,settings:data.settings&&typeof data.settings==='object'?data.settings:{},daily:data.daily}:null;
   }
-  const api={PALETTES,SILVER_CARP,fishPalette,createSilverCarpShoal,BODY,randomSeed,weatherFromCode,clamp,wrap,createFish,updateSpine,fishPose,PondSimulation,sanitizeSave};
+  const api={PALETTES,SILVER_CARP,fishPalette,createSilverCarpShoal,BODY,HUNGER_TIME,randomSeed,weatherFromCode,clamp,wrap,createFish,updateSpine,fishPose,PondSimulation,sanitizeSave};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
   else root.PondCore=api;
 })(typeof window!=='undefined'?window:globalThis);
