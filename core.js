@@ -86,8 +86,11 @@
     feed(x,y,count=9) {
       if(this.food.length >= 180) return false;
       for(let i=0;i<count && this.food.length<180;i++){const a=this.random()*TAU,r=Math.sqrt(this.random())*24;let px=x+Math.cos(a)*r,py=y+Math.sin(a)*r;
-        // A pellet that lands in the ring around a rock that a koi cannot reach would sit there until it rotted:/n        // nudge it out past the stone, where a fish can actually get its mouth to it.
-        for(const ob of this.obstacles)if(ob.hard){const dx=px-ob.x,dy=py-ob.y,d=Math.hypot(dx,dy)||1,R=ob.r+30;if(d<R){px=ob.x+dx/d*R;py=ob.y+dy/d*R;}}
+        // A pellet in the ring around a rock that no koi can reach would sit there until it rotted: push it out
+        // past the stone. Repeat, because leaving one circle of a rock can land it inside the next circle, or
+        // straight into a neighbour and wedge it in the crack between two stones.
+        const keep=42*this.scale;
+        for(let pass=0;pass<8;pass++){let moved=false;for(const ob of this.obstacles)if(ob.hard){const dx=px-ob.x,dy=py-ob.y,d=Math.hypot(dx,dy)||1,R=ob.r+keep;if(d<R-.5){px=ob.x+dx/d*R;py=ob.y+dy/d*R;moved=true;}}if(!moved)break;}
         this.food.push({x:clamp(px,15,this.width-15),y:clamp(py,15,this.height-15),life:25,age:0,drift:this.random()*6,vx:Math.cos(a)*r*.8,vy:Math.sin(a)*r*.8,eaten:false});}
       return true;
     }
@@ -112,6 +115,13 @@
       for(const f of neighbours)this.swim(f,sdt,neighbours);
       if(this.food.some(p=>p.eaten))this.food=this.food.filter(p=>!p.eaten);
     }
+    // Is the water a body-length or so ahead open? Used to keep a detour from turning into a dead end.
+    clearAhead(x, y, dirX, dirY, L) {
+      const w = this.width, h = this.height, px = x + dirX * L * 1.6, py = y + dirY * L * 1.6;
+      if (px < w * .05 || px > w * .95 || py < h * .05 || py > h * .95) return false;
+      for (const ob of this.obstacles) if (ob.hard && Math.hypot(px - ob.x, py - ob.y) < ob.r + L * .35) return false;
+      return true;
+    }
     // If a rock stands in the way of where the fish wants to go, this returns the angle to swim instead: along the
     // rock's rim, on the side that still makes progress toward the goal. Null when the way is clear.
     rockRim(x, y, dirX, dirY, L, goalDist) {
@@ -126,6 +136,9 @@
         const nx = dx / dist, ny = dy / dist;             // pointing away from the rock
         let tx = -ny, ty = nx;                            // along its rim
         if (tx * dirX + ty * dirY < 0) { tx = -tx; ty = -ty; }
+        // Do not send the fish along a rim that runs straight into the bank or another rock; the other side is just
+        // as far the long way round, and if both are blocked the escape manoeuvre in swim() takes over.
+        if (!this.clearAhead(x, y, tx, ty, L)) { tx = -tx; ty = -ty; if (!this.clearAhead(x, y, tx, ty, L)) return null; }
         return Math.atan2(ty, tx);
       }
       return null;
@@ -135,14 +148,17 @@
       let x=f.x*w,y=f.y*h;const cos=Math.cos(f.angle),sin=Math.sin(f.angle),mx=x+cos*BODY.nose*s,my=y+sin*BODY.nose*s;
       // A full koi barely notices food; an empty one spots it from across the pond.
       const blocked=f.blocked||0;f.blocked=0;let food=null,fd=Infinity;const reach=Math.max(w,h)*f.appetite*(.5+.5*f.hunger);
-      for(const p of (f.species === 'silvercarp' ? [] : this.food)){if(p.eaten)continue;const d=Math.hypot(p.x-mx,p.y-my);if(d<fd&&d<reach&&p.age>f.react+d/650){fd=d;food=p;}}
+      // A pellet it has jammed on three times in a row is left alone for a few seconds, so a koi cannot spend the
+      // afternoon circling one grain stuck in a crack.
+      if(f.ignore){f.ignore.t-=dt;if(f.ignore.t<=0)f.ignore=null;}
+      for(const p of (f.species === 'silvercarp' ? [] : this.food)){if(p.eaten||(f.ignore&&f.ignore.p===p))continue;const d=Math.hypot(p.x-mx,p.y-my);if(d<fd&&d<reach&&p.age>f.react+d/650){fd=d;food=p;}}
       let gx,gy,want,turnGain=silver?3.5:2,maxTurn=silver?2.4:1.3,sepW=2.4,boundW=3;
       f.flee=Math.max(0,f.flee-dt);
       // Startle: a fast C-turn away, then a dash.
       if(f.flee>0){gx=Math.cos(f.fleeAngle);gy=Math.sin(f.fleeAngle);want=2.6*L;turnGain=9;maxTurn=7;}
       else if(food){
         const dx=food.x-x,dy=food.y-y,d=Math.hypot(dx,dy)||1,err=Math.abs(wrap(Math.atan2(dy,dx)-f.angle));
-        gx=dx/d;gy=dy/d;want=clamp(fd/L*1.3,.25,2.2)*L*Math.max(.12,Math.cos(Math.min(err,Math.PI/2))**2);
+        gx=dx/d;gy=dy/d;want=clamp(fd/L*1.3,.25,2.2)*L*Math.max(.28,Math.cos(Math.min(err,Math.PI/2))**2);
         // Food under the body can't be reached by pivoting; swim on to open a gap, then come back around.
         if(d<BODY.nose*s*1.15&&err>.6&&!blocked){gx=cos;gy=sin;want=.7*L;}
         turnGain=4.5;maxTurn=3.4;sepW=1.1;boundW=.8;f.depthGoal=.04;
@@ -177,13 +193,36 @@
       if(ly<mY)by=(mY-ly)/mY;else if(ly>h-mY)by=(h-mY-ly)/mY;
       for(const ob of this.obstacles)for(const [px,py,R] of [[lx,ly,ob.r+L*.4],[x,y,ob.r+L*.2]]){const dx=px-ob.x,dy=py-ob.y,d=Math.hypot(dx,dy)||1;if(d<R){const k=(1-d/R)*2.5;bx+=dx/d*k;by+=dy/d*k;}}
       const desired=Math.atan2(gy+sy*sepW+ay*.15+by*boundW,gx+sx*sepW+ax*.15+bx*boundW);
+      // A koi can wedge itself into a pocket where the push out of a rock and the push back from the bank cancel
+      // each other: it keeps swimming on the spot. Count the time spent pressed into rock, and after a while hand
+      // it an escape heading — the clearest way out of the pocket, not the way toward the food.
+      if(f.blockedT>.7&&!(f.escape>0)){
+        const n=Math.hypot(bx,by),away=n>.02?Math.atan2(by,bx):f.angle+Math.PI;
+        let best=away,bestScore=-1e9;
+        for(let i=0;i<9;i++){
+          const a=away+(i-4)*.42,score=(this.clearAhead(x,y,Math.cos(a),Math.sin(a),L)?1:0)-Math.abs(i-4)*.1;
+          if(score>bestScore){bestScore=score;best=a;}
+        }
+        f.escapeAngle=wrap(best+(random()-.5)*.3);f.escape=1.4+random()*.5;
+        f.v=Math.max(f.v,L*.5);f.blockedT=0;
+        // Jammed on the same grain three times? Leave it; it is in a crack no koi can get its mouth into.
+        if(food){if(f.jamFood===food)f.jams=(f.jams||0)+1;else{f.jamFood=food;f.jams=1;}if(f.jams>=3){f.ignore={p:food,t:9};f.jams=0;f.jamFood=null;}}
+      }
+      // Last resort: six seconds of going nowhere with no stone to blame. A crowd can pin a koi just as well, so
+      // turn it around and let it push out on its own.
+      if(f.v<L*.12&&f.rest<=0&&f.flee<=0&&!(f.escape>0))f.idleT=(f.idleT||0)+dt;
+      else f.idleT=Math.max(0,(f.idleT||0)-dt*2);
+      if(f.idleT>6){f.idleT=0;f.escapeAngle=wrap(f.angle+Math.PI*(.55+random()*.5));f.escape=.8;f.v=L*.45;f.goal=null;}
+      // While escaping, aim at the way out and turn hard; food can wait a second.
+      let aim=desired;
+      if(f.escape>0){f.escape-=dt;aim=f.escapeAngle;turnGain=6;maxTurn=4;want=Math.max(want,L*.7);}
       // If a rock stands between the fish and where it is heading, follow the rim of the rock instead of butting
       // into it — on the side that still makes progress toward the goal. Without this a koi whose food lies straight
       // behind a rock presses against it forever.
       const goalDist=food?fd:(f.goal?Math.hypot(f.goal.x*w-x,f.goal.y*h-y):1e9);
-      const rim=f.flee>0?null:this.rockRim(x,y,Math.cos(desired),Math.sin(desired),L,goalDist);
+      const rim=f.flee>0||f.escape>0?null:this.rockRim(x,y,Math.cos(desired),Math.sin(desired),L,goalDist);
       if(rim!==null)f.turn+=(clamp(wrap(rim-f.angle)*6,-maxTurn*1.6,maxTurn*1.6)-f.turn)*Math.min(1,dt*8);
-      else f.turn+=(clamp(wrap(desired-f.angle)*turnGain,-maxTurn,maxTurn)-f.turn)*Math.min(1,dt*(f.flee>0?14:silver?7:4));
+      else f.turn+=(clamp(wrap(aim-f.angle)*turnGain,-maxTurn,maxTurn)-f.turn)*Math.min(1,dt*(f.flee>0?14:silver?7:4));
       f.angle=wrap(f.angle+f.turn*dt);
       // Beat-and-glide: a few tail strokes to speed up, then coast.
       if(f.v<want*.8)f.beating=true;else if(f.v>want*1.15)f.beating=false;
@@ -197,7 +236,12 @@
       x+=Math.cos(f.angle)*f.v*dt;y+=Math.sin(f.angle)*f.v*dt;
       // Solid rock is not swimmable: a koi that overlaps it is pushed back out, twice round so a run of
       // overlapping circles (one rock, several circles) cannot squeeze it through a gap.
-      for(let pass=0;pass<2;pass++)for(const ob of this.obstacles)if(ob.hard){const dx=x-ob.x,dy=y-ob.y,d=Math.hypot(dx,dy)||1,R=ob.r+L*.25;if(d<R){x=ob.x+dx/d*R;y=ob.y+dy/d*R;f.blocked=1;if(Math.cos(f.angle)*dx/Math.abs(d)+Math.sin(f.angle)*dy/Math.abs(d)<0)f.v*=.85;}}
+      let hit=0;
+      for(let pass=0;pass<2;pass++)for(const ob of this.obstacles)if(ob.hard){const dx=x-ob.x,dy=y-ob.y,d=Math.hypot(dx,dy)||1,R=ob.r+L*.28;if(d<R){x=ob.x+dx/d*R;y=ob.y+dy/d*R;f.blocked=1;if(dx*Math.cos(f.angle)+dy*Math.sin(f.angle)<=0)hit=1;}}
+      // One brake per frame, not one per circle: a rock made of three circles used to slow the koi six times over,
+      // which is what left it hanging motionless against the stone.
+      if(hit)f.v*=.88;
+      if(f.blocked)f.blockedT=(f.blockedT||0)+dt;else f.blockedT=Math.max(0,(f.blockedT||0)-dt*1.5);
       f.x=clamp(x/w,.03,.97);f.y=clamp(y/h,.035,.965);
       f.depth+=(f.depthGoal-f.depth)*Math.min(1,dt*(food?1.2:.35));
       updateSpine(f,s,w,h);

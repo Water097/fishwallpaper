@@ -193,3 +193,33 @@ test('鱼食不会落进石头旁边鱼够不着的死角',()=>{
     for(const p of pond.food)assert.ok(Math.hypot(p.x-500,p.y-350)>=40+29,`落在死角 ${Math.hypot(p.x-500,p.y-350).toFixed(0)}px`);
   }
 });
+
+test('被石头和岸边夹住的锦鲤不会一直贴着不动',()=>{
+  const random=randomSeed(13),fish=createFish(0,random);
+  fish.x=.92;fish.y=.58;fish.hunger=.9;
+  const pond=new PondSimulation([fish],1000,700,random);pond.scale=1;
+  // 一堵石壁贴着右岸，鱼被塞在石壁与岸之间的角里
+  pond.obstacles=[{x:930,y:450,r:60,hard:true},{x:930,y:540,r:60,hard:true},{x:960,y:600,r:45,hard:true}];
+  pond.feed(960,660,1);
+  let stall=0,worst=0;
+  for(let i=0;i<60*20;i++){
+    const x0=fish.x,y0=fish.y;
+    pond.step(1/60);
+    if(Math.hypot(fish.x-x0,fish.y-y0)*1000<.15&&fish.rest<=0){stall++;worst=Math.max(worst,stall);}else stall=0;
+  }
+  assert.ok(worst/60<2.5,`最长贴住 ${(worst/60).toFixed(1)} 秒`);
+});
+
+test('鱼食不会落进两块石头的夹缝里',()=>{
+  const random=randomSeed(17);
+  const pond=new PondSimulation([createFish(0,random)],1000,700,random);pond.scale=1;
+  pond.obstacles=[{x:500,y:330,r:60,hard:true},{x:500,y:430,r:60,hard:true},{x:570,y:380,r:55,hard:true}];
+  for(let t=0;t<200;t++){
+    pond.food.length=0;
+    pond.feed(500+random()*90-45,380+random()*90-45,9);
+    for(const p of pond.food)for(const o of pond.obstacles){
+      const gap=Math.hypot(p.x-o.x,p.y-o.y)-o.r;
+      assert.ok(gap>=40,`鱼食贴到石头上只剩 ${gap.toFixed(0)}px，鱼吃不到`);
+    }
+  }
+});
