@@ -169,6 +169,8 @@ $('.close-panel').addEventListener('click',()=>dialog.close());
 dialog.addEventListener('click',e=>{if(e.target===dialog){const r=dialog.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)dialog.close();}});
 dialog.addEventListener('close',()=>{activePanel='';previewCanvas=null;previewFish=null;citySearchController?.abort();});
 let prefsTab='settings';
+// 天气页已经收进「设置」弹窗的天气页签里，判断现在是不是正停在那一页——天气拉回来之后要刷新的就是它。
+const weatherTabOpen=()=>activePanel==='weather'||(activePanel==='settings'&&prefsTab==='weather');
 const prefsHost=()=>$('#prefs-body')||$('#panel-content');
 // 天气与池塘设置同住一个弹窗，两个页签切换；从底栏哪个按钮进来就落在哪一页。
 function renderPrefs(){
@@ -307,16 +309,17 @@ function renderWeather(){
   $('#city-form').addEventListener('submit', searchCity);
 }
 
-// 天气这一组标题右边的一行小字：选中的城市和它此刻的气温，够用就好，细节留给下方的联动状态。
+// 天气这一组标题右边的一行小字：选中的城市和它此刻的气温，够用就好，细节留给下方。
 function updateWeatherInfo(){
   const box = $('#weather-info'); if (!box) return;
   if (!settings.location) { box.textContent = '未选城市'; return; }
   const name = settings.location.name;
-  const temp = weatherData ? ` ${Math.round(weatherData.temperature_2m)}°C` : '';
-  box.textContent = settings.autoWeather ? `${name}${temp} · 联动` : `${name}${temp} · 未联动`;
+  if (!settings.autoWeather) { box.textContent = weatherData ? `${name} ${Math.round(weatherData.temperature_2m)}°C · 未联动` : `${name} · 未联动`; return; }
+  // 刚选完城市、还没拉回数据时也说一声，别让右边空着。
+  box.textContent = weatherData ? `${name} ${Math.round(weatherData.temperature_2m)}°C` : `${name} · 获取中…`;
 }
 async function searchCity(e){e.preventDefault();const query=$('#city-input').value.trim();if(!query)return;const results=$('#city-results'),button=$('#city-form button');citySearchController?.abort();const controller=new AbortController();citySearchController=controller;const timeout=setTimeout(()=>controller.abort(),12000);button.disabled=true;button.textContent='查询中';results.textContent='正在寻找城市…';try{const response=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=zh&format=json`,{signal:controller.signal});if(!response.ok)throw Error('network');const data=await response.json();if(!results.isConnected)return;results.replaceChildren();if(!data.results?.length){results.textContent='没有找到这个城市，试试城市拼音或英文名称。';return;}for(const place of data.results){const b=document.createElement('button');b.className='city-result';b.textContent=`${place.name} · ${place.admin1||''} ${place.country||''}`;b.addEventListener('click',()=>{settings.location={name:place.name,latitude:place.latitude,longitude:place.longitude};settings.autoWeather=true;weatherData=null;persist();applyWeather();renderWeather();fetchWeather();});results.append(b);}}catch{if(results.isConnected)results.textContent='城市查询失败，请检查网络后重试。仍可使用上方的手动天气。';}finally{clearTimeout(timeout);if(button.isConnected){button.disabled=false;button.textContent='查询';}}}
-async function fetchWeather(){if(!settings.autoWeather||!settings.location)return;const request=++weatherRequest,location={...settings.location};try{const response=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${location.latitude}&longitude=${location.longitude}&current=temperature_2m,weather_code,wind_speed_10m,precipitation,snowfall&timezone=auto`,{signal:AbortSignal.timeout(12000)});if(!response.ok)throw Error('network');const data=await response.json();if(request!==weatherRequest||!settings.autoWeather)return;if(!Number.isFinite(data.current?.temperature_2m)||!Number.isFinite(data.current?.weather_code))throw Error('data');weatherData=data.current;settings.weather=weatherFromCode(weatherData.weather_code);if(settings.weather==='rain'&&Number.isFinite(weatherData.precipitation))settings.rainAmount=clamp(.15+weatherData.precipitation/8,.15,1);if(settings.weather==='snow'&&Number.isFinite(weatherData.snowfall))settings.snowAmount=clamp(.2+weatherData.snowfall/1.5,.2,1);applyWeather();persist();if(activePanel==='weather')renderWeather();}catch{if(request!==weatherRequest)return;$('#weather-note').textContent='天气同步失败 · 保留当前天气';if(activePanel==='weather'&&$('#weather-info'))$('#weather-info').textContent='天气服务暂时无法连接，已保留当前池塘天气，可稍后重试。';toast('实时天气暂不可用，已保留当前天气');}}
+async function fetchWeather(){if(!settings.autoWeather||!settings.location)return;const request=++weatherRequest,location={...settings.location};try{const response=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${location.latitude}&longitude=${location.longitude}&current=temperature_2m,weather_code,wind_speed_10m,precipitation,snowfall&timezone=auto`,{signal:AbortSignal.timeout(12000)});if(!response.ok)throw Error('network');const data=await response.json();if(request!==weatherRequest||!settings.autoWeather)return;if(!Number.isFinite(data.current?.temperature_2m)||!Number.isFinite(data.current?.weather_code))throw Error('data');weatherData=data.current;settings.weather=weatherFromCode(weatherData.weather_code);if(settings.weather==='rain'&&Number.isFinite(weatherData.precipitation))settings.rainAmount=clamp(.15+weatherData.precipitation/8,.15,1);if(settings.weather==='snow'&&Number.isFinite(weatherData.snowfall))settings.snowAmount=clamp(.2+weatherData.snowfall/1.5,.2,1);applyWeather();persist();if(weatherTabOpen())renderWeather();else updateWeatherInfo();}catch{if(request!==weatherRequest)return;$('#weather-note').textContent='天气同步失败 · 保留当前天气';{const box=$('#weather-info');if(box)box.textContent='同步失败';}toast('实时天气暂不可用，已保留当前天气');}}
 setInterval(fetchWeather,15*60*1000);if(settings.autoWeather)fetchWeather();
 function renderSettings(){
   const residents = [['turtles', '小乌龟', '两位慢悠悠的池塘住客'], ['crabs', '小螃蟹', '在池边石头上横着走，一有动静就钻进水里'], ['silverCarp', '青鲢鱼', '银鳞结伴，穿梭于锦鲤之间'], ['butterflies', '蝴蝶与蜻蜓', '晴日蝶舞，蜻蜓点水，夜里萤火点点'], ['names', '显示锦鲤名字', '在水面认出你的每一位朋友']];
